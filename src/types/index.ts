@@ -49,22 +49,51 @@ export type ReportCategory =
   | "harassment"
   | "poor-lighting"
   | "unsafe-area"
+  | "suspicious-activity"
   | "stalking"
   | "transport"
   | "other";
 
+export type ReportStatus =
+  | "unverified"
+  | "under_review"
+  | "verified"
+  | "rejected"
+  | "resolved"
+  | "pending"
+  | "flagged"
+  | string;
+
 export interface CommunityReport {
-  id: string;
+  id: string | number;
   category: ReportCategory;
   title: string;
   description: string;
   area: string;
+  location_label?: string | null | undefined;
   lat: number;
   lng: number;
-  reportedAt: string;
-  status: "pending" | "verified" | "flagged";
+  reportedAt?: string | undefined;
+  reported_at?: string | undefined;
+  createdAt?: string | undefined;
+  created_at?: string | undefined;
+  reviewed_at?: string | null | undefined;
+  reviewed_by?: string | null | undefined;
+  status: ReportStatus;
   verifications: number;
-  reporter: string;
+  reporter?: string | undefined;
+  reporter_label?: string | undefined;
+  is_demo?: boolean | undefined;
+}
+
+export interface CommunityReportModeration extends CommunityReport {
+  moderator_notes?: string | null | undefined;
+}
+
+export interface ModerationActionPayload {
+  status: ReportStatus;
+  moderator_note?: string | undefined;
+  moderator_name?: string | undefined;
 }
 
 export interface EvidenceItem {
@@ -150,10 +179,14 @@ export interface ShareLink {
 }
 
 export interface MapMarker extends LatLng {
-  label?: string;
-  tone?: "primary" | "pink" | "warning" | "destructive" | "success";
-  isDemo?: boolean;
-  subLabel?: string;
+  label?: string | undefined;
+  tone?: ("primary" | "pink" | "warning" | "destructive" | "success") | undefined;
+  isDemo?: boolean | undefined;
+  subLabel?: string | undefined;
+  customColor?: string | undefined;
+  popupHtml?: string | undefined;
+  id?: (string | number) | undefined;
+  onClick?: (() => void) | undefined;
 }
 
 export interface MapPolyline {

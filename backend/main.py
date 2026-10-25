@@ -38,6 +38,7 @@ from routers import routes as routes_router
 from routers import crime_stats as crime_stats_router
 from routers import safety_data as safety_data_router
 from routers import journeys as journeys_router
+from routers import community_reports as community_reports_router
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +131,6 @@ app.include_router(safety_data_router.router, prefix="/api/v1")
 
 # Active Journeys API (Phase 2)
 app.include_router(journeys_router.router, prefix="/api/v1")
+
+# Community Safety Reports API (Phase 3)
+app.include_router(community_reports_router.router, prefix="/api/v1")

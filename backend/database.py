@@ -40,6 +40,19 @@ def init_db():
                     conn.exec_driver_sql("ALTER TABLE check_ins ADD COLUMN created_at DATETIME")
                 if "responded_at" not in ci_cols:
                     conn.exec_driver_sql("ALTER TABLE check_ins ADD COLUMN responded_at DATETIME")
+
+            cr_cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(community_reports)").fetchall()]
+            if cr_cols:
+                if "created_at" not in cr_cols:
+                    conn.exec_driver_sql("ALTER TABLE community_reports ADD COLUMN created_at DATETIME")
+                if "is_demo" not in cr_cols:
+                    conn.exec_driver_sql("ALTER TABLE community_reports ADD COLUMN is_demo BOOLEAN DEFAULT 0")
+                if "moderator_notes" not in cr_cols:
+                    conn.exec_driver_sql("ALTER TABLE community_reports ADD COLUMN moderator_notes TEXT")
+                if "reviewed_at" not in cr_cols:
+                    conn.exec_driver_sql("ALTER TABLE community_reports ADD COLUMN reviewed_at DATETIME")
+                if "reviewed_by" not in cr_cols:
+                    conn.exec_driver_sql("ALTER TABLE community_reports ADD COLUMN reviewed_by VARCHAR(100)")
             conn.commit()
     except Exception:
         pass

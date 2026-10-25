@@ -24,7 +24,8 @@ import { compareRoutes } from "@/api/routes";
 import type { RouteAlternative, RouteCompareResponse } from "@/api/routes";
 import { fetchSafetyData } from "@/api/safety-data";
 import type { DemoSafetyRecord } from "@/api/safety-data";
-import type { MapMarker, RouteOption, SafetyLevel, TransportMode } from "@/types";
+import { createReportPopupHtml, fetchCommunityReports } from "@/api/community-reports";
+import type { MapMarker, ReportCategory, RouteOption, SafetyLevel, TransportMode } from "@/types";
 
 export const Route = createFileRoute("/route-safety")({
   head: () =>
@@ -162,6 +163,14 @@ function RouteSafety() {
 
   const demoRecords = safetyDataQuery.data?.records ?? [];
 
+  const communityReportsQuery = useQuery({
+    queryKey: ["community-reports"],
+    queryFn: () => fetchCommunityReports({ includeDemo: true }),
+    staleTime: 30 * 1000,
+  });
+
+  const communityReports = communityReportsQuery.data ?? COMMUNITY_REPORTS;
+
   const mutation = useMutation({
     mutationFn: () =>
       compareRoutes({
@@ -214,13 +223,15 @@ function RouteSafety() {
 
   const reportCircles = useMemo(() => {
     if (!routes.length || !showReports) return [];
-    return COMMUNITY_REPORTS.map((r) => ({
-      lat: r.lat,
-      lng: r.lng,
-      radiusM: 220,
-      color: CATEGORY_COLORS[r.category],
-    }));
-  }, [routes, showReports]);
+    return communityReports
+      .filter((r) => typeof r.lat === "number" && typeof r.lng === "number" && (r.lat !== 0 || r.lng !== 0))
+      .map((r) => ({
+        lat: r.lat as number,
+        lng: r.lng as number,
+        radiusM: 220,
+        color: CATEGORY_COLORS[r.category as ReportCategory] ?? "#64748b",
+      }));
+  }, [routes, showReports, communityReports]);
 
   const mapMarkers = useMemo(() => {
     const list: MapMarker[] = [
@@ -240,8 +251,26 @@ function RouteSafety() {
         });
       }
     }
+    if (showReports && communityReports.length > 0) {
+      for (const r of communityReports) {
+        if (typeof r.lat === "number" && typeof r.lng === "number" && (r.lat !== 0 || r.lng !== 0)) {
+          const isDemo = Boolean(r.is_demo);
+          list.push({
+            lat: r.lat as number,
+            lng: r.lng as number,
+            label: `Report: ${r.title} (${r.status})`,
+            subLabel: `${r.area || "Area"} · ${isDemo ? "Demo sample" : "Community report"}`,
+            tone: (r.status === "verified" ? "success" : r.status === "flagged" ? "destructive" : "warning"),
+            isDemo,
+            customColor: CATEGORY_COLORS[r.category as ReportCategory] ?? undefined,
+            popupHtml: createReportPopupHtml(r),
+            id: r.id,
+          });
+        }
+      }
+    }
     return list;
-  }, [points, showDemoSignals, demoRecords]);
+  }, [points, showDemoSignals, demoRecords, showReports, communityReports]);
 
   const errorMessage = useMemo(() => {
     if (!mutation.error) return null;

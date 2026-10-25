@@ -26,6 +26,7 @@ export async function apiRequest<TResponse>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
+  customHeaders?: Record<string, string>,
 ): Promise<TResponse> {
   const url = `${BASE_URL}${path}`;
 
@@ -34,6 +35,7 @@ export async function apiRequest<TResponse>(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...(customHeaders || {}),
     },
   };
   if (body !== undefined) init.body = JSON.stringify(body);

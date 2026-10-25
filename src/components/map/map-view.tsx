@@ -36,7 +36,7 @@ const TILE_ATTRIBUTION =
 const TILE_MAX_ZOOM = 19;
 
 function createLeafletMarker(L: typeof import("leaflet"), m: MapMarker) {
-  const color = TONES[m.tone ?? "primary"];
+  const color = m.customColor ?? TONES[m.tone ?? "primary"];
   const isDemo = Boolean(m.isDemo);
   const iconHtml = isDemo
     ? `<div style="width:16px;height:16px;transform:rotate(45deg);background:${color};border:2px solid #ffffff;box-shadow:0 1px 5px rgba(0,0,0,0.35);border-radius:3px;"></div>`
@@ -49,12 +49,22 @@ function createLeafletMarker(L: typeof import("leaflet"), m: MapMarker) {
     iconAnchor: isDemo ? [8, 8] : [9, 9],
   });
   const marker = L.marker([m.lat, m.lng] as L.LatLngExpression, { icon });
+
   if (m.label) {
     const tooltipContent = isDemo
       ? `<div style="font-size:11.5px;font-family:sans-serif;line-height:1.35;max-width:230px"><span style="display:inline-block;padding:1.5px 5px;font-size:9.5px;font-weight:500;color:#6b7280;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;margin-bottom:3px">Illustrative sample</span><br/><strong>${m.label}</strong>${m.subLabel ? `<br/><span style="color:#6b7280;font-size:10.5px">${m.subLabel}</span>` : ""}</div>`
       : m.label;
     marker.bindTooltip(tooltipContent, { direction: "top", offset: [0, -8] });
   }
+
+  if (m.popupHtml) {
+    marker.bindPopup(m.popupHtml, { maxWidth: 280, closeButton: true });
+  }
+
+  if (m.onClick) {
+    marker.on("click", m.onClick);
+  }
+
   return marker;
 }
 

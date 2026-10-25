@@ -114,10 +114,15 @@ class CommunityReport(Base):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     reporter_label: Mapped[str] = mapped_column(String(120), nullable=False, default="anonymous")
-    # "pending" | "verified" | "flagged"
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # "unverified" | "pending" | "verified" | "flagged"
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unverified")
     verifications: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    moderator_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 # ---------------------------------------------------------------------------
