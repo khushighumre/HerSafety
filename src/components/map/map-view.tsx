@@ -37,9 +37,9 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
 
     void (async () => {
       const L = await import("leaflet");
-      await import("leaflet/dist/leaflet.css" as string);
       if (cancelled || !containerRef.current) return;
 
+      if (mapRef.current) return;
       const map = L.map(containerRef.current, {
         center,
         zoom,
