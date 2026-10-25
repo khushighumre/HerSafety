@@ -22,14 +22,34 @@ from routers import routes as routes_router
 # CORS origins
 # ---------------------------------------------------------------------------
 
+# Origins that are always allowed regardless of the env var.
+# Covers both the default Lovable/TanStack Start port (8080) and the port
+# reported in the CORS preflight failure (8081), in both localhost and
+# 127.0.0.1 forms so the browser's choice of hostname never matters.
+_BUILTIN_ORIGINS = [
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+]
+
+
 def _cors_origins() -> list[str]:
     """
-    Read allowed origins from BACKEND_CORS_ORIGINS env var (comma-separated).
-    Falls back to the Lovable/TanStack Start default dev port (8080).
-    Set BACKEND_CORS_ORIGINS in a .env file or your shell to override.
+    Build the allowed-origins list.
+
+    Starts from _BUILTIN_ORIGINS, then merges any additional origins from the
+    BACKEND_CORS_ORIGINS env var (comma-separated).  The env var is additive —
+    it does not replace the built-in list.
+    Set BACKEND_CORS_ORIGINS in backend/.env to add deployed preview URLs.
     """
-    raw = os.getenv("BACKEND_CORS_ORIGINS", "http://localhost:8080")
-    return [o.strip() for o in raw.split(",") if o.strip()]
+    extra_raw = os.getenv("BACKEND_CORS_ORIGINS", "")
+    extra = [o.strip() for o in extra_raw.split(",") if o.strip()]
+    # Preserve insertion order, deduplicate.
+    seen: dict[str, None] = {}
+    for o in _BUILTIN_ORIGINS + extra:
+        seen[o] = None
+    return list(seen)
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +80,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=False,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", "Accept"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "Authorization"],
 )
 
 # Root health check (no prefix) + versioned alias under /api/v1

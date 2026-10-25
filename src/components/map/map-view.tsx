@@ -23,8 +23,21 @@ interface MapViewProps {
 }
 
 /**
+ * Tile provider constants — swap these to change the map source without
+ * touching component logic.
+ *
+ * OSM standard tiles: free, no API key required.
+ * Attribution is required by the OSM tile usage policy.
+ * https://operations.osmfoundation.org/policies/tiles/
+ */
+const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+const TILE_MAX_ZOOM = 19;
+
+/**
  * Client-only Leaflet map. Leaflet is dynamically imported inside an effect so
- * it never runs during SSR. Tiles come from Carto (OSM-based, free for demos).
+ * it never runs during SSR. Tiles come from OpenStreetMap (free, no API key).
  */
 export function MapView({ center, zoom = 13, markers = [], polylines = [], circles = [], fitAll = true, className, dark }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -48,12 +61,10 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
       });
       mapRef.current = map;
 
-      L.tileLayer(
-        dark
-          ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>', maxZoom: 19 },
-      ).addTo(map);
+      L.tileLayer(TILE_URL, {
+        attribution: TILE_ATTRIBUTION,
+        maxZoom: TILE_MAX_ZOOM,
+      }).addTo(map);
 
       const bounds: [number, number][] = [];
       const layers: L.Layer[] = [];

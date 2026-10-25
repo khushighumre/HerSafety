@@ -307,6 +307,62 @@ class TestScoring:
 
 
 # ---------------------------------------------------------------------------
+# CORS preflight
+# ---------------------------------------------------------------------------
+
+class TestCors:
+    """Verify that OPTIONS preflights from the frontend origins are accepted."""
+
+    PREFLIGHT_HEADERS = {
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    }
+
+    def _preflight(self, origin: str):
+        return client.options(
+            "/api/v1/routes/compare",
+            headers={"Origin": origin, **self.PREFLIGHT_HEADERS},
+        )
+
+    def test_preflight_localhost_8081_status(self):
+        r = self._preflight("http://localhost:8081")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+
+    def test_preflight_localhost_8081_acao_header(self):
+        r = self._preflight("http://localhost:8081")
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:8081"
+
+    def test_preflight_127_8081_status(self):
+        r = self._preflight("http://127.0.0.1:8081")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+
+    def test_preflight_127_8081_acao_header(self):
+        r = self._preflight("http://127.0.0.1:8081")
+        assert r.headers.get("access-control-allow-origin") == "http://127.0.0.1:8081"
+
+    def test_preflight_localhost_8080_still_works(self):
+        """Existing default origin must not be broken by the change."""
+        r = self._preflight("http://localhost:8080")
+        assert r.status_code == 200
+        assert r.headers.get("access-control-allow-origin") == "http://localhost:8080"
+
+    def test_preflight_unknown_origin_rejected(self):
+        """An origin not in the allow-list must not receive the ACAO header."""
+        r = self._preflight("http://evil.example.com")
+        assert r.headers.get("access-control-allow-origin") != "http://evil.example.com"
+
+    def test_preflight_allows_post_method(self):
+        r = self._preflight("http://localhost:8081")
+        acam = r.headers.get("access-control-allow-methods", "")
+        assert "POST" in acam
+
+    def test_preflight_allows_content_type_header(self):
+        r = self._preflight("http://localhost:8081")
+        acah = r.headers.get("access-control-allow-headers", "")
+        assert "content-type" in acah.lower()
+
+
+# ---------------------------------------------------------------------------
 # Travel mode variants
 # ---------------------------------------------------------------------------
 
