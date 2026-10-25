@@ -121,7 +121,7 @@ function NotificationsMenu() {
       <DropdownMenuContent align="end" className="w-80 p-2">
         <DropdownMenuLabel className="flex items-center justify-between">
           Notifications
-          <Badge variant="secondary" className="text-[10px]">Demo</Badge>
+          <Badge variant="secondary" className="text-[10px]">Recent</Badge>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {NOTIFICATIONS.map((n) => {

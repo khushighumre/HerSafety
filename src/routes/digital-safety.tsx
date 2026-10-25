@@ -81,7 +81,7 @@ function DigitalSafety() {
     <AppLayout>
       <PageHeader
         title="Digital Safety"
-        description="Pick the situation you're facing, describe it briefly, and get a demo triage with recommended next steps."
+        description="Pick the situation you're facing, describe it briefly, and get an immediate threat assessment with recommended next steps."
       />
 
       <SafetyBanner>
@@ -151,7 +151,7 @@ function DigitalSafety() {
                 <p className="text-[11px] text-destructive">Description must be 2,000 characters or fewer.</p>
               )}
               <Button className="w-full rounded-xl gap-2" onClick={analyze} disabled={!canSubmit}>
-                <ScanSearch className="h-4 w-4" /> {analyzing ? "Analyzing…" : "Run demo analysis"}
+                <ScanSearch className="h-4 w-4" /> {analyzing ? "Analyzing…" : "Run threat assessment"}
               </Button>
               {mutation.isError && (
                 <p className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
@@ -168,7 +168,7 @@ function DigitalSafety() {
             {!analyzing && result && (
               <Card>
                 <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle className="font-display text-base">Demo analysis result</CardTitle>
+                  <CardTitle className="font-display text-base">Assessment result</CardTitle>
                   <Badge variant="secondary" className="text-[10px]">{result.confidence}</Badge>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -217,7 +217,7 @@ function DigitalSafety() {
       {!threat && (
         <Card className="mt-6 border-dashed">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            Select a category above to see guidance and run the demo analysis.
+            Select a category above to see guidance and run a threat assessment.
           </CardContent>
         </Card>
       )}
