@@ -98,7 +98,7 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
 
       if (fitAll && bounds.length > 1) {
         map.fitBounds(L.latLngBounds(bounds).pad(0.18));
-      } else if (fitAll && bounds.length === 1) {
+      } else if (fitAll && bounds.length === 1 && bounds[0]) {
         map.setView(bounds[0], zoom);
       }
 
@@ -134,7 +134,7 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
       for (const c of circles) bounds.push([c.lat, c.lng]);
       for (const m of markers) bounds.push([m.lat, m.lng]);
       if (bounds.length > 1) map.fitBounds(L.latLngBounds(bounds).pad(0.18));
-      else if (bounds.length === 1) map.setView(bounds[0], zoom);
+      else if (bounds.length === 1 && bounds[0]) map.setView(bounds[0], zoom);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(polylines), JSON.stringify(markers), JSON.stringify(circles)]);

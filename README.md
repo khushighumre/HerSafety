@@ -1,3 +1,4 @@
+
 # Safe Steps Circle
 
 Build a modern, responsive web application called Her Safety, a privacy-first women's physical and digital safety platform for a hackathon.
