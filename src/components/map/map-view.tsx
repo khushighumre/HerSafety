@@ -35,6 +35,29 @@ const TILE_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
 const TILE_MAX_ZOOM = 19;
 
+function createLeafletMarker(L: typeof import("leaflet"), m: MapMarker) {
+  const color = TONES[m.tone ?? "primary"];
+  const isDemo = Boolean(m.isDemo);
+  const iconHtml = isDemo
+    ? `<div style="width:16px;height:16px;transform:rotate(45deg);background:${color};border:2px solid #ffffff;box-shadow:0 1px 5px rgba(0,0,0,0.35);border-radius:3px;"></div>`
+    : `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4)"></div>`;
+
+  const icon = L.divIcon({
+    className: "",
+    html: iconHtml,
+    iconSize: isDemo ? [16, 16] : [18, 18],
+    iconAnchor: isDemo ? [8, 8] : [9, 9],
+  });
+  const marker = L.marker([m.lat, m.lng] as L.LatLngExpression, { icon });
+  if (m.label) {
+    const tooltipContent = isDemo
+      ? `<div style="font-size:11.5px;font-family:sans-serif;line-height:1.35;max-width:230px"><span style="display:inline-block;padding:1.5px 5px;font-size:9.5px;font-weight:500;color:#6b7280;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;margin-bottom:3px">Illustrative sample</span><br/><strong>${m.label}</strong>${m.subLabel ? `<br/><span style="color:#6b7280;font-size:10.5px">${m.subLabel}</span>` : ""}</div>`
+      : m.label;
+    marker.bindTooltip(tooltipContent, { direction: "top", offset: [0, -8] });
+  }
+  return marker;
+}
+
 /**
  * Client-only Leaflet map. Leaflet is dynamically imported inside an effect so
  * it never runs during SSR. Tiles come from OpenStreetMap (free, no API key).
@@ -42,6 +65,7 @@ const TILE_MAX_ZOOM = 19;
 export function MapView({ center, zoom = 13, markers = [], polylines = [], circles = [], fitAll = true, className, dark }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<unknown>(null);
+  const layerGroupRef = useRef<unknown>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -66,44 +90,36 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
         maxZoom: TILE_MAX_ZOOM,
       }).addTo(map);
 
+      const layerGroup = L.layerGroup().addTo(map);
+      layerGroupRef.current = layerGroup;
+
       const bounds: [number, number][] = [];
-      const layers: L.Layer[] = [];
 
       for (const line of polylines) {
-        const poly = L.polyline(line.coords as L.LatLngExpression[], {
+        L.polyline(line.coords as L.LatLngExpression[], {
           color: line.color,
           weight: line.weight ?? 5,
-          opacity: 0.9,
+          opacity: line.opacity ?? 0.9,
           dashArray: line.dashed ? "6 10" : undefined,
           lineCap: "round",
-        }).addTo(map);
-        layers.push(poly);
+        }).addTo(layerGroup);
         bounds.push(...(line.coords as [number, number][]));
       }
 
       for (const c of circles) {
-        const circle = L.circle([c.lat, c.lng] as L.LatLngExpression, {
+        L.circle([c.lat, c.lng] as L.LatLngExpression, {
           radius: c.radiusM,
           color: c.color,
           weight: 1.5,
           fillColor: c.color,
           fillOpacity: 0.12,
-        }).addTo(map);
-        layers.push(circle);
+        }).addTo(layerGroup);
         bounds.push([c.lat, c.lng]);
       }
 
       for (const m of markers) {
-        const color = TONES[m.tone ?? "primary"];
-        const icon = L.divIcon({
-          className: "",
-          html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.4)"></div>`,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-        });
-        const marker = L.marker([m.lat, m.lng] as L.LatLngExpression, { icon }).addTo(map);
-        if (m.label) marker.bindTooltip(m.label, { direction: "top", offset: [0, -8] });
-        layers.push(marker);
+        const marker = createLeafletMarker(L, m);
+        marker.addTo(layerGroup);
         bounds.push([m.lat, m.lng]);
       }
 
@@ -117,6 +133,8 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
       setReady(true);
 
       cleanup = () => {
+        layerGroup.clearLayers();
+        layerGroupRef.current = null;
         map.remove();
         mapRef.current = null;
       };
@@ -129,7 +147,7 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fit when inputs change (post-mount updates like selected route).
+  // Update layers and re-fit when inputs change (post-mount updates like route selection or backend response).
   const firstRender = useRef(true);
   useEffect(() => {
     if (firstRender.current) {
@@ -139,13 +157,45 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
     void (async () => {
       const L = await import("leaflet");
       const map = mapRef.current as L.Map | null;
-      if (!map) return;
+      const layerGroup = layerGroupRef.current as L.LayerGroup | null;
+      if (!map || !layerGroup) return;
+
+      layerGroup.clearLayers();
       const bounds: [number, number][] = [];
-      for (const line of polylines) bounds.push(...(line.coords as [number, number][]));
-      for (const c of circles) bounds.push([c.lat, c.lng]);
-      for (const m of markers) bounds.push([m.lat, m.lng]);
-      if (bounds.length > 1) map.fitBounds(L.latLngBounds(bounds).pad(0.18));
-      else if (bounds.length === 1 && bounds[0]) map.setView(bounds[0], zoom);
+
+      for (const line of polylines) {
+        L.polyline(line.coords as L.LatLngExpression[], {
+          color: line.color,
+          weight: line.weight ?? 5,
+          opacity: line.opacity ?? 0.9,
+          dashArray: line.dashed ? "6 10" : undefined,
+          lineCap: "round",
+        }).addTo(layerGroup);
+        bounds.push(...(line.coords as [number, number][]));
+      }
+
+      for (const c of circles) {
+        L.circle([c.lat, c.lng] as L.LatLngExpression, {
+          radius: c.radiusM,
+          color: c.color,
+          weight: 1.5,
+          fillColor: c.color,
+          fillOpacity: 0.12,
+        }).addTo(layerGroup);
+        bounds.push([c.lat, c.lng]);
+      }
+
+      for (const m of markers) {
+        const marker = createLeafletMarker(L, m);
+        marker.addTo(layerGroup);
+        bounds.push([m.lat, m.lng]);
+      }
+
+      if (fitAll && bounds.length > 1) {
+        map.fitBounds(L.latLngBounds(bounds).pad(0.18));
+      } else if (fitAll && bounds.length === 1 && bounds[0]) {
+        map.setView(bounds[0], zoom);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(polylines), JSON.stringify(markers), JSON.stringify(circles)]);

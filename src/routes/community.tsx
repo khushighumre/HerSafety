@@ -37,7 +37,8 @@ function CommunitySafety() {
   const [fCategory, setFCategory] = useState<ReportCategory>("poor-lighting");
   const [fTitle, setFTitle] = useState("");
   const [fDesc, setFDesc] = useState("");
-  const [fArea, setFArea] = useState(DEMO_LOCATIONS[1].name);
+  const defaultArea = DEMO_LOCATIONS[1]?.name ?? "Indiranagar 100ft Rd";
+  const [fArea, setFArea] = useState(defaultArea);
 
   const filtered = useMemo(
     () => (filter === "all" ? reports : reports.filter((r) => r.category === filter)),
@@ -60,7 +61,8 @@ function CommunitySafety() {
 
   const submit = () => {
     if (!fTitle.trim()) return;
-    const area = DEMO_LOCATIONS.find((l) => l.name === fArea) ?? DEMO_LOCATIONS[1];
+    const fallbackLocation = DEMO_LOCATIONS[1] ?? { name: "Indiranagar 100ft Rd", lat: 12.9719, lng: 77.6412 };
+    const area = DEMO_LOCATIONS.find((l) => l.name === fArea) ?? fallbackLocation;
     setReports((rs) => [
       {
         id: `r${Date.now()}`,

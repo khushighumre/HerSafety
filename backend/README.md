@@ -100,19 +100,49 @@ Restart uvicorn after changing `.env`.
 
 ---
 
+## OpenStreetMap Geographic Context Layer
+
+Phase 1B introduces real, source-backed geographic evidence along route corridors retrieved from OpenStreetMap via Overpass API.
+
+- **No paid API key required**: Overpass is an open, public service.
+- **Configurable endpoints**: Set `OVERPASS_ENDPOINT` in `backend/.env` to switch between public instances.
+- **In-memory caching**: Corridor query responses are cached with a configurable TTL (`OVERPASS_CACHE_TTL_SEC`, default: 30 minutes) to minimize external requests and prevent rate-limiting.
+- **Bounded timeouts & error resilience**: Configurable timeout (`OVERPASS_TIMEOUT_SEC`, default: 10s). If the provider is unreachable, routes return with an explicit `unavailable` status; live routing geometry, distance, and duration are preserved.
+- **Safety disclaimer**: Mapped physical amenities, road classes, and lighting tags provide geographic context only. They do not constitute verified safety predictions or proof of route safety.
+
+### Overpass Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OVERPASS_ENDPOINT` | `https://overpass-api.de/api/interpreter` | Overpass API public interpreter endpoint |
+| `OVERPASS_TIMEOUT_SEC` | `10.0` | Timeout in seconds for Overpass queries |
+| `OVERPASS_CACHE_TTL_SEC` | `1800.0` | In-memory cache TTL in seconds (30 mins) |
+| `OVERPASS_MAX_CACHE_SIZE` | `200` | Maximum number of cached corridor bounding boxes |
+| `OVERPASS_MAX_BBOX_SPAN` | `0.25` | Max bounding box dimension in degrees (~28 km) |
+
+---
+
 ## Project structure
 
 ```
 backend/
-  main.py          # FastAPI app, CORS, lifespan
-  database.py      # SQLAlchemy engine, session, Base, get_db
-  models.py        # ORM table definitions
-  schemas.py       # Pydantic request/response schemas
+  main.py                   # FastAPI app, CORS, lifespan
+  database.py               # SQLAlchemy engine, session, Base, get_db
+  models.py                 # ORM table definitions
+  schemas.py                # Pydantic request/response schemas
+  routing_provider.py       # OpenRouteService live routing & geocoding
+  osm_evidence_provider.py  # OpenStreetMap / Overpass corridor evidence
+  scoring.py                # Deterministic scoring functions & demo heuristics
   requirements.txt
   .env.example
   routers/
     __init__.py
-    health.py      # GET /health and GET /api/v1/health
-  uploads/         # Evidence file storage (gitignored)
-  nightwise.db     # SQLite database (gitignored, auto-created)
+    health.py               # GET /health and GET /api/v1/health
+    routes.py               # POST /api/v1/routes/compare
+  tests/
+    test_routes.py          # Routing provider, endpoint, scoring, CORS tests
+    test_osm_evidence.py    # Overpass evidence provider unit & integration tests
+  uploads/                  # Evidence file storage (gitignored)
+  nightwise.db              # SQLite database (gitignored, auto-created)
 ```
+

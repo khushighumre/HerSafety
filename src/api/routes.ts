@@ -39,6 +39,54 @@ export interface RouteGapApi {
   note: string;
 }
 
+export interface FeatureCounts {
+  transport_stops: number;
+  assistance_amenities: number;
+  street_lamps: number;
+  lit_path_segments: number;
+  surveillance_points: number;
+  road_segments: number;
+}
+
+export interface TagEvidenceSummary {
+  amenity_types: Record<string, number>;
+  transport_types: Record<string, number>;
+  highway_types: Record<string, number>;
+  lighting_tags: Record<string, number>;
+  surveillance_tags: Record<string, number>;
+}
+
+export interface GeographicEvidence {
+  source: string;
+  attribution: string;
+  endpoint: string;
+  retrieved_at: string | null;
+  status: "available" | "partial" | "unavailable" | "error";
+  counts: FeatureCounts;
+  observed_tags: TagEvidenceSummary;
+  limitations: string[];
+  missing_data_notes: string[];
+}
+
+export interface DemoCategoryCounts {
+  public_transport: number;
+  assistance_points: number;
+  lighting: number;
+  cctv: number;
+  community_safety_reports: number;
+  total: number;
+}
+
+export interface DemoSafetyContext {
+  source: string;
+  status: string;
+  is_corridor_filtered: boolean;
+  filter_description: string;
+  counts: DemoCategoryCounts;
+  matched_record_ids: string[];
+  disclaimer: string;
+}
+
 export interface RouteAlternative {
   id: string;
   label: string;
@@ -56,16 +104,23 @@ export interface RouteAlternative {
   notes: string[];
   coords: [number, number][];
   disclaimer: string;
+  evidence?: GeographicEvidence | null | undefined;
+  demo_context?: DemoSafetyContext | null | undefined;
 }
+
+
 
 export interface RouteCompareResponse {
   origin: string;
   destination: string;
   mode: string;
   maxDetourPct: number;
-  fastest: RouteAlternative;
-  balanced: RouteAlternative;
-  safest_available_data: RouteAlternative;
+  routes?: RouteAlternative[];
+  fastest?: RouteAlternative | null;
+  balanced?: RouteAlternative | null;
+  safest_available_data?: RouteAlternative | null;
+  resolved_origin?: string;
+  resolved_destination?: string;
   disclaimer: string;
 }
 

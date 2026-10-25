@@ -5,8 +5,27 @@ IMPORTANT: This backend does NOT contact real emergency services.
 All SOS and journey-sharing flows are clearly simulated.
 """
 
+import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Ensure backend directory is on sys.path regardless of working directory
+_backend_dir = Path(__file__).resolve().parent
+_root_dir = _backend_dir.parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+# Load environment variables from backend/.env and root .env
+load_dotenv(_root_dir / ".env")
+load_dotenv(_backend_dir / ".env")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("nightwise")
+logger.setLevel(logging.INFO)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +35,8 @@ from database import engine, Base
 import models  # noqa: F401
 from routers import health as health_router
 from routers import routes as routes_router
+from routers import crime_stats as crime_stats_router
+from routers import safety_data as safety_data_router
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +52,12 @@ _BUILTIN_ORIGINS = [
     "http://127.0.0.1:8080",
     "http://localhost:8081",
     "http://127.0.0.1:8081",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
 ]
 
 
@@ -59,6 +86,7 @@ def _cors_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    logger.info("NightWise backend startup complete. Active routing provider: openrouteservice")
     yield
 
 
@@ -79,9 +107,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "X-Requested-With"],
 )
 
 # Root health check (no prefix) + versioned alias under /api/v1
@@ -90,3 +119,9 @@ app.include_router(health_router.router, prefix="/api/v1")
 
 # Routes API
 app.include_router(routes_router.router)
+
+# Crime Statistics API
+app.include_router(crime_stats_router.router, prefix="/api/v1")
+
+# Synthetic Safety Data API (Phase 1 Demo Signals)
+app.include_router(safety_data_router.router, prefix="/api/v1")

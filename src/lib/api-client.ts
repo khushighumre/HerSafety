@@ -43,8 +43,12 @@ export async function apiRequest<TResponse>(
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const json = (await res.json()) as { detail?: string };
-      if (typeof json.detail === "string") detail = json.detail;
+      const json = (await res.json()) as { detail?: string | Array<{ msg?: string }> };
+      if (typeof json.detail === "string") {
+        detail = json.detail;
+      } else if (Array.isArray(json.detail)) {
+        detail = json.detail.map((item) => item.msg ?? JSON.stringify(item)).join("; ");
+      }
     } catch {
       // ignore parse failure — keep statusText
     }

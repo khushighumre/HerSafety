@@ -3,34 +3,60 @@ backend/routers/routes.py
 
 POST /api/v1/routes/compare
 
-Returns three route alternatives (fastest, balanced, safest_available_data)
-for a given origin/destination pair and travel mode.
+Generates real route alternatives using the OpenRouteService provider
+for any user-specified origin, destination, and travel mode.
 
 IMPORTANT — DATA DISCLAIMER:
-  All route scores and signal values are computed from clearly-labelled
-  demo fixture data. They are illustrative heuristics, not verified
-  real-world safety predictions and are not AI-generated.
-  Do not rely on them for real travel decisions.
+  Real route geometry, distance, and duration are retrieved from OpenRouteService.
+  All safety scores and signals in Phase 1A are simulated demo heuristics,
+  NOT verified real-world safety predictions. Do not rely on them for real travel decisions.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from fixtures import LOCATIONS, VALID_MODES, ROUTE_PATHS
-from scoring import compute_night_score, compute_confidence, estimate_duration
+from scoring import compute_night_score, compute_confidence
+from routing_provider import OpenRouteServiceRoutingProvider, ProviderRoute
+from osm_evidence_provider import (
+    OpenStreetMapEvidenceProvider,
+    GeographicEvidence,
+    FeatureCounts,
+    TagEvidenceSummary,
+    is_point_near_polyline,
+)
+from routers.safety_data import load_demo_records
+
+logger = logging.getLogger("nightwise.routes")
+logger.setLevel(logging.INFO)
 
 router = APIRouter(prefix="/api/v1/routes", tags=["routes"])
+
+VALID_MODES = {"walk", "car", "bike"}
+
+# ---------------------------------------------------------------------------
+# Dependency injection for routing provider & evidence provider
+# ---------------------------------------------------------------------------
+
+def get_routing_provider() -> OpenRouteServiceRoutingProvider:
+    return OpenRouteServiceRoutingProvider()
+
+
+def get_evidence_provider() -> OpenStreetMapEvidenceProvider:
+    return OpenStreetMapEvidenceProvider()
+
+
 
 # ---------------------------------------------------------------------------
 # Request schema
 # ---------------------------------------------------------------------------
 
 class RouteCompareRequest(BaseModel):
-    origin: str = Field(..., description="Location name matching a known demo location")
-    destination: str = Field(..., description="Location name matching a known demo location")
+    origin: str = Field(..., description="Origin location name or 'lat, lng' coordinates")
+    destination: str = Field(..., description="Destination location name or 'lat, lng' coordinates")
     mode: str = Field("walk", description="Travel mode: walk, car, or bike")
     maxDetourPct: int = Field(
         50,
@@ -41,17 +67,13 @@ class RouteCompareRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_request(self) -> "RouteCompareRequest":
-        if self.origin not in LOCATIONS:
-            raise ValueError(
-                f"Unknown origin '{self.origin}'. "
-                f"Valid locations: {sorted(LOCATIONS.keys())}"
-            )
-        if self.destination not in LOCATIONS:
-            raise ValueError(
-                f"Unknown destination '{self.destination}'. "
-                f"Valid locations: {sorted(LOCATIONS.keys())}"
-            )
-        if self.origin == self.destination:
+        self.origin = self.origin.strip()
+        self.destination = self.destination.strip()
+        if not self.origin:
+            raise ValueError("origin cannot be empty")
+        if not self.destination:
+            raise ValueError("destination cannot be empty")
+        if self.origin.lower() == self.destination.lower():
             raise ValueError("origin and destination must be different locations")
         if self.mode not in VALID_MODES:
             raise ValueError(
@@ -77,6 +99,29 @@ class RouteGap(BaseModel):
     note: str
 
 
+class DemoCategoryCounts(BaseModel):
+    public_transport: int = 0
+    assistance_points: int = 0
+    lighting: int = 0
+    cctv: int = 0
+    community_safety_reports: int = 0
+    total: int = 0
+
+
+class DemoSafetyContext(BaseModel):
+    source: str = "SYNTHETIC DEMO DATA — NOT VERIFIED"
+    status: str = "simulated_demo"
+    is_corridor_filtered: bool = True
+    filter_description: str = "Corridor proximity (< 600m of route polyline)"
+    counts: DemoCategoryCounts = Field(default_factory=DemoCategoryCounts)
+    matched_record_ids: list[str] = Field(default_factory=list)
+    disclaimer: str = (
+        "DEMO DATA — NOT VERIFIED. All records and counts are synthetic demonstration samples. "
+        "They do NOT represent verified physical facilities, real crime reports, or active field observations, "
+        "and do NOT modify or verify route safety scores."
+    )
+
+
 class RouteAlternative(BaseModel):
     id: str
     label: str
@@ -93,8 +138,9 @@ class RouteAlternative(BaseModel):
     gap: RouteGap
     notes: list[str]
     coords: list[list[float]]
-    # Explicit disclaimer included in every response object
     disclaimer: str
+    evidence: Optional[GeographicEvidence] = None
+    demo_context: Optional[DemoSafetyContext] = None
 
 
 class RouteCompareResponse(BaseModel):
@@ -102,62 +148,167 @@ class RouteCompareResponse(BaseModel):
     destination: str
     mode: str
     maxDetourPct: int
-    fastest: RouteAlternative
-    balanced: RouteAlternative
-    safest_available_data: RouteAlternative
+    routes: list[RouteAlternative] = Field(
+        default_factory=list,
+        description="List of genuine route alternatives returned by the provider (1 to 3)",
+    )
+    fastest: Optional[RouteAlternative] = None
+    balanced: Optional[RouteAlternative] = None
+    safest_available_data: Optional[RouteAlternative] = None
+    resolved_origin: Optional[str] = None
+    resolved_destination: Optional[str] = None
     disclaimer: str
 
 
 # ---------------------------------------------------------------------------
-# Coordinate validation helper
+# Selection & building logic
 # ---------------------------------------------------------------------------
 
-def _validate_coords(coords: list[list[float]], path_key: str) -> None:
-    """Raise ValueError if any coordinate is outside plausible Bengaluru bounds."""
-    from fixtures import LAT_MIN, LAT_MAX, LNG_MIN, LNG_MAX
-    for i, pt in enumerate(coords):
-        if len(pt) != 2:
-            raise ValueError(f"Path '{path_key}' coord[{i}] must have exactly 2 elements")
-        lat, lng = pt
-        if not (LAT_MIN <= lat <= LAT_MAX):
-            raise ValueError(
-                f"Path '{path_key}' coord[{i}] lat={lat} outside [{LAT_MIN}, {LAT_MAX}]"
-            )
-        if not (LNG_MIN <= lng <= LNG_MAX):
-            raise ValueError(
-                f"Path '{path_key}' coord[{i}] lng={lng} outside [{LNG_MIN}, {LNG_MAX}]"
-            )
+DISCLAIMER = (
+    "DEMO DATA: Routing geometry, distance, and duration are provided by OpenRouteService. "
+    "Safety scores and signals are simulated heuristics for demonstration only — "
+    "they are NOT verified real-world safety predictions and must not be used as the sole basis for travel decisions."
+)
+
+DEMO_HEURISTIC_PRESETS: dict[str, dict] = {
+    "fastest": {
+        "signals": {
+            "lighting": 55,
+            "activity": 42,
+            "main_road": 75,
+            "transport_help": 60,
+            "cctv": None,
+        },
+        "gap_km": 1.0,
+        "gap_note": "Simulated heuristic: passes potential lower foot-traffic stretch late at night",
+        "data_coverage_pct": 85,
+        "freshness_hours": 4,
+    },
+    "balanced": {
+        "signals": {
+            "lighting": 75,
+            "activity": 68,
+            "main_road": 80,
+            "transport_help": 75,
+            "cctv": 55,
+        },
+        "gap_km": 0.0,
+        "gap_note": "",
+        "data_coverage_pct": 92,
+        "freshness_hours": 2,
+    },
+    "safest_available_data": {
+        "signals": {
+            "lighting": 82,
+            "activity": None,
+            "main_road": 65,
+            "transport_help": 70,
+            "cctv": None,
+        },
+        "gap_km": 2.5,
+        "gap_note": "Simulated heuristic: segment with sparse reporting in demo dataset",
+        "data_coverage_pct": 65,
+        "freshness_hours": 12,
+    },
+}
 
 
-# ---------------------------------------------------------------------------
-# Core selection logic
-# ---------------------------------------------------------------------------
+def compute_demo_safety_context(coords: list[list[float]]) -> DemoSafetyContext:
+    """
+    Compute synthetic safety context for a route alternative using the existing
+    demo_safety_data.json dataset.
+    
+    If corridor proximity finds records near the polyline (within 600m), counts
+    those records specifically along the route. If none are near (e.g. route outside
+    sample area), returns area-wide demo dataset totals explicitly labelled as area totals.
+    """
+    records = load_demo_records()
+    if not records:
+        return DemoSafetyContext(
+            source="SYNTHETIC DEMO DATA — NOT VERIFIED",
+            status="simulated_demo",
+            is_corridor_filtered=False,
+            filter_description="No synthetic demo records available",
+            counts=DemoCategoryCounts(),
+            matched_record_ids=[],
+        )
+
+    # 1. Attempt corridor proximity filtering (< 600 meters)
+    corridor_matches = [
+        r for r in records
+        if is_point_near_polyline(
+            float(r.get("latitude", 0.0)),
+            float(r.get("longitude", 0.0)),
+            coords,
+            threshold_meters=600.0,
+        )
+    ]
+
+    if corridor_matches:
+        is_corridor = True
+        desc = "Corridor proximity (< 600m of route polyline)"
+        selected = corridor_matches
+    else:
+        is_corridor = False
+        desc = "Bengaluru demo dataset totals (route corridor outside demo sample zone)"
+        selected = records
+
+    counts = DemoCategoryCounts()
+    matched_ids: list[str] = []
+
+    for r in selected:
+        sig = str(r.get("signal_type", "")).strip().lower()
+        matched_ids.append(str(r.get("id", "")))
+        if sig == "public_transport":
+            counts.public_transport += 1
+        elif sig == "assistance_point":
+            counts.assistance_points += 1
+        elif sig == "lighting":
+            counts.lighting += 1
+        elif sig == "cctv":
+            counts.cctv += 1
+        elif sig in ("community_safety_report", "community_report"):
+            counts.community_safety_reports += 1
+
+    counts.total = (
+        counts.public_transport
+        + counts.assistance_points
+        + counts.lighting
+        + counts.cctv
+        + counts.community_safety_reports
+    )
+
+    return DemoSafetyContext(
+        source="SYNTHETIC DEMO DATA — NOT VERIFIED",
+        status="simulated_demo",
+        is_corridor_filtered=is_corridor,
+        filter_description=desc,
+        counts=counts,
+        matched_record_ids=matched_ids,
+    )
+
 
 def _build_alternative(
-    route_id: str,
-    path: dict,
-    mode: str,
+    role_id: str,
+    label: str,
+    route: ProviderRoute,
     detour_pct: float,
     max_detour_pct: int,
+    mode: str,
+    evidence: Optional[GeographicEvidence] = None,
+    demo_context: Optional[DemoSafetyContext] = None,
 ) -> RouteAlternative:
-    """Score one path fixture and return a RouteAlternative."""
+    """Combine live routing metrics from OpenRouteService with clearly marked simulated demo safety signals and real OSM evidence."""
+    preset = DEMO_HEURISTIC_PRESETS.get(role_id, DEMO_HEURISTIC_PRESETS["fastest"])
+
+    if demo_context is None:
+        demo_context = compute_demo_safety_context(route.coords)
+
     night_score, breakdown, gap_penalty = compute_night_score(
-        path["signals"], path["gap_km"]
+        preset["signals"], preset["gap_km"]
     )
-    confidence = compute_confidence(path["signals"], path["data_coverage_pct"])
-    duration = estimate_duration(path["duration_walk_min"], mode)
+    confidence = compute_confidence(preset["signals"], preset["data_coverage_pct"])
 
-    # Validate geometry
-    _validate_coords(path["coords"], path.get("label", route_id))
-
-    gap = RouteGap(
-        gap_km=path["gap_km"],
-        gap_from=path.get("gap_from", ""),
-        gap_to=path.get("gap_to", ""),
-        note=path.get("gap_note", ""),
-    )
-
-    # Build breakdown with typed objects
     typed_breakdown = {
         k: SignalBreakdown(
             score=v["score"],
@@ -167,167 +318,191 @@ def _build_alternative(
         for k, v in breakdown.items()
     }
 
-    # Add gap penalty info to notes
-    notes = list(path["notes"])
-    if gap_penalty > 0:
-        notes.append(
-            f"Gap penalty applied: {gap_penalty:.0%} reduction to raw score "
-            f"({path['gap_km']:.1f} km low-activity gap × 5 pp/km, "
-            f"capped at 30%)."
-        )
-    if mode != "walk":
-        notes.append(
-            f"Duration ({duration} min) is a demo estimate using a "
-            f"{mode} speed multiplier — no real routing API is used."
-        )
-
-    disclaimer = (
-        "DEMO DATA: All scores are illustrative heuristics computed from "
-        "hackathon fixture data. They are not verified real-world safety "
-        "predictions and must not be used as the sole basis for travel decisions."
+    gap = RouteGap(
+        gap_km=preset["gap_km"],
+        gap_from="11:30 PM" if preset["gap_km"] > 0 else "",
+        gap_to="1:00 AM" if preset["gap_km"] > 0 else "",
+        note=preset["gap_note"],
     )
 
+    notes = [
+        "Real route geometry, distance, and duration provided live by OpenRouteService.",
+        "DEMO SAFETY DATA — Safety scores and signals are simulated heuristics for demonstration only, not verified real-world safety measurements.",
+    ]
+    if evidence is not None and evidence.status == "available":
+        notes.append(
+            f"OSM geographic context: {evidence.counts.transport_stops} transit stops, "
+            f"{evidence.counts.assistance_amenities} assistance amenities, "
+            f"{evidence.counts.street_lamps + evidence.counts.lit_path_segments} lighting items, "
+            f"{evidence.counts.surveillance_points} CCTV mapped along corridor."
+        )
+    elif evidence is not None and evidence.status in ("unavailable", "error"):
+        notes.append("OSM geographic context: Provider data currently unavailable or timed out.")
+        notes.append(
+            f"Synthetic demo context (NOT VERIFIED): {demo_context.counts.public_transport} transit stops, "
+            f"{demo_context.counts.assistance_points} assistance points, "
+            f"{demo_context.counts.lighting} lighting items, "
+            f"{demo_context.counts.cctv} CCTV points, "
+            f"{demo_context.counts.community_safety_reports} community reports."
+        )
+
+    if gap_penalty > 0:
+        notes.append(
+            f"Gap penalty applied: {gap_penalty:.0%} reduction to raw demo score."
+        )
+
     return RouteAlternative(
-        id=route_id,
-        label=path["label"],
-        distanceKm=path["distance_km"],
-        durationMin=duration,
+        id=role_id,
+        label=label,
+        distanceKm=route.distance_km,
+        durationMin=route.duration_min,
         mode=mode,
         nightScore=night_score,
         breakdown=typed_breakdown,
         confidence=confidence,
-        dataCoveragePct=path["data_coverage_pct"],
-        freshnessHours=path["freshness_hours"],
+        dataCoveragePct=preset["data_coverage_pct"],
+        freshnessHours=preset["freshness_hours"],
         detourPct=round(detour_pct, 1),
         maxDetourPct=max_detour_pct,
         gap=gap,
         notes=notes,
-        coords=path["coords"],
-        disclaimer=disclaimer,
+        coords=route.coords,
+        disclaimer=DISCLAIMER,
+        evidence=evidence,
+        demo_context=demo_context,
     )
-
-
-def _select_routes(
-    candidates: list[dict],
-    mode: str,
-    max_detour_pct: int,
-) -> tuple[dict, dict, dict]:
-    """
-    Select fastest, balanced, and safest_available_data from candidates.
-
-    fastest:               lowest estimated duration
-    balanced:              minimises (duration_rank + safety_rank) composite
-    safest_available_data: highest night_score among detour-eligible candidates
-
-    Detour is calculated relative to the fastest candidate's duration.
-    The detour cap is enforced server-side; candidates exceeding it are
-    ineligible for balanced and safest roles.
-
-    Returns (fastest_path, balanced_path, safest_path) dicts, each augmented
-    with computed 'night_score' and 'detour_pct' keys.
-    """
-    if not candidates:
-        raise HTTPException(
-            status_code=404,
-            detail="No route fixtures found for this origin/destination pair.",
-        )
-
-    # Score and estimate duration for all candidates
-    scored = []
-    for path in candidates:
-        night_score, _, _ = compute_night_score(path["signals"], path["gap_km"])
-        duration = estimate_duration(path["duration_walk_min"], mode)
-        scored.append({**path, "_night_score": night_score, "_duration": duration})
-
-    # Fastest = minimum duration
-    fastest = min(scored, key=lambda p: p["_duration"])
-    fastest_duration = fastest["_duration"]
-
-    # Compute detour % for each candidate relative to fastest
-    for p in scored:
-        p["_detour_pct"] = (
-            (p["_duration"] - fastest_duration) / fastest_duration * 100
-            if fastest_duration > 0 else 0.0
-        )
-
-    # Fastest always has detour 0 — always eligible
-    fastest["_detour_pct"] = 0.0
-
-    # Detour-eligible candidates (fastest is always included)
-    eligible = [p for p in scored if p["_detour_pct"] <= max_detour_pct]
-
-    if len(eligible) < 1:
-        eligible = [fastest]
-
-    # Safest = highest night_score among eligible
-    safest = max(eligible, key=lambda p: p["_night_score"])
-
-    # Balanced = minimise composite rank (duration rank + safety rank)
-    # Lower rank = better. Ties broken by higher safety score.
-    n = len(eligible)
-    duration_sorted = sorted(eligible, key=lambda p: p["_duration"])
-    safety_sorted = sorted(eligible, key=lambda p: -p["_night_score"])
-
-    def _composite(p: dict) -> tuple[int, int]:
-        d_rank = duration_sorted.index(p)
-        s_rank = safety_sorted.index(p)
-        return (d_rank + s_rank, d_rank)  # secondary: prefer faster on tie
-
-    balanced = min(eligible, key=_composite)
-
-    return fastest, balanced, safest
 
 
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
 
-DISCLAIMER = (
-    "DEMO DATA: All route scores are illustrative heuristics computed from "
-    "hackathon fixture data. They are not verified real-world safety predictions "
-    "and must not be used as the sole basis for travel decisions."
-)
-
-
 @router.post("/compare", response_model=RouteCompareResponse)
-def compare_routes(req: RouteCompareRequest) -> RouteCompareResponse:
+def compare_routes(
+    req: RouteCompareRequest,
+    provider: OpenRouteServiceRoutingProvider = Depends(get_routing_provider),
+    evidence_provider: OpenStreetMapEvidenceProvider = Depends(get_evidence_provider),
+) -> RouteCompareResponse:
     """
-    Compare route alternatives for a given origin/destination and travel mode.
+    Compare route alternatives using OpenRouteService live routing.
 
-    Returns three alternatives: fastest, balanced, and safest_available_data.
-    Scores are computed from demo fixture data only — not verified real-world data.
+    - Resolves place names to coordinates via provider geocoding, or parses user-supplied coordinates.
+    - Generates real route geometry, distance, and duration from OpenRouteService.
+    - Queries real OpenStreetMap geographic context for each returned route corridor.
+    - Returns genuine alternatives respecting maxDetourPct without fabricating non-existent routes.
+    - Preserves API contract with explicit demo safety score annotations.
     """
-    # Find all fixture paths matching this origin/destination pair
-    candidates = [
-        path for path in ROUTE_PATHS.values()
-        if path["origin"] == req.origin and path["destination"] == req.destination
-    ]
+    logger.info(
+        "Routing request received | provider: openrouteservice | mode: %s | maxDetourPct: %d",
+        req.mode,
+        req.maxDetourPct,
+    )
 
-    if not candidates:
+    # 1. Geocode or parse origin and destination coordinates
+    start_lat, start_lng, resolved_origin = provider.geocode(req.origin)
+    end_lat, end_lng, resolved_destination = provider.geocode(req.destination)
+
+    # Disallow identical resolved locations
+    if abs(start_lat - end_lat) < 1e-5 and abs(start_lng - end_lng) < 1e-5:
         raise HTTPException(
-            status_code=404,
-            detail=(
-                f"No route fixtures available for '{req.origin}' → '{req.destination}'. "
-                "This is a demo backend with a limited fixture set. "
-                f"Available pairs: MG Road Metro → Koramangala 5th Block."
-            ),
+            status_code=422,
+            detail="Origin and destination resolved to the same coordinate location.",
         )
 
-    fastest_path, balanced_path, safest_path = _select_routes(
-        candidates, req.mode, req.maxDetourPct
+    # 2. Query routing provider for routes and alternatives
+    raw_routes = provider.get_routes(
+        start_lat=start_lat,
+        start_lng=start_lng,
+        end_lat=end_lat,
+        end_lng=end_lng,
+        mode=req.mode,
+        max_detour_pct=req.maxDetourPct,
     )
 
-    fastest_alt = _build_alternative(
-        "fastest", fastest_path, req.mode,
-        fastest_path["_detour_pct"], req.maxDetourPct,
-    )
-    balanced_alt = _build_alternative(
-        "balanced", balanced_path, req.mode,
-        balanced_path["_detour_pct"], req.maxDetourPct,
-    )
-    safest_alt = _build_alternative(
-        "safest_available_data", safest_path, req.mode,
-        safest_path["_detour_pct"], req.maxDetourPct,
+    if not raw_routes:
+        raise HTTPException(
+            status_code=404,
+            detail="No route found between the specified origin and destination.",
+        )
+
+    # 3. Identify fastest route and calculate detour percentage for alternatives
+    fastest_cand = min(raw_routes, key=lambda r: r.duration_min)
+    fastest_duration = fastest_cand.duration_min
+
+    # Sort candidates by duration, ensuring fastest is first
+    other_cands = [r for r in raw_routes if r is not fastest_cand]
+    sorted_candidates = [fastest_cand] + sorted(other_cands, key=lambda r: r.duration_min)
+
+    # Filter by maxDetourPct relative to fastest route
+    eligible: list[tuple[ProviderRoute, float]] = []
+    for cand in sorted_candidates:
+        if cand is fastest_cand:
+            eligible.append((cand, 0.0))
+        else:
+            detour_pct = (
+                ((cand.duration_min - fastest_duration) / fastest_duration * 100.0)
+                if fastest_duration > 0
+                else 0.0
+            )
+            if detour_pct <= req.maxDetourPct:
+                eligible.append((cand, detour_pct))
+
+    # 4. Map eligible routes to genuine alternatives without fabrication or duplication
+    routes: list[RouteAlternative] = []
+    fastest_alt: Optional[RouteAlternative] = None
+    balanced_alt: Optional[RouteAlternative] = None
+    safest_alt: Optional[RouteAlternative] = None
+
+    # Retrieve corridor evidence efficiently across all eligible alternatives
+    # Queries the shared corridor envelope once, preventing duplicate requests and sequential timeouts
+    eligible_coords = [cand.coords for cand, _ in eligible]
+    if hasattr(evidence_provider, "get_multi_corridor_evidence"):
+        evidence_list = evidence_provider.get_multi_corridor_evidence(eligible_coords)
+    else:
+        evidence_list = [evidence_provider.get_corridor_evidence(c) for c in eligible_coords]
+
+    if len(eligible) == 1:
+        ev0 = evidence_list[0] if len(evidence_list) > 0 else None
+        fastest_alt = _build_alternative(
+            "fastest", "Fastest", eligible[0][0], 0.0, req.maxDetourPct, req.mode, evidence=ev0
+        )
+        routes = [fastest_alt]
+    elif len(eligible) == 2:
+        ev0 = evidence_list[0] if len(evidence_list) > 0 else None
+        ev1 = evidence_list[1] if len(evidence_list) > 1 else None
+        fastest_alt = _build_alternative(
+            "fastest", "Fastest", eligible[0][0], 0.0, req.maxDetourPct, req.mode, evidence=ev0
+        )
+        balanced_alt = _build_alternative(
+            "balanced", "Balanced", eligible[1][0], eligible[1][1], req.maxDetourPct, req.mode, evidence=ev1
+        )
+        routes = [fastest_alt, balanced_alt]
+    else:
+        # 3 or more eligible routes
+        ev0 = evidence_list[0] if len(evidence_list) > 0 else None
+        ev1 = evidence_list[1] if len(evidence_list) > 1 else None
+        ev2 = evidence_list[2] if len(evidence_list) > 2 else None
+        fastest_alt = _build_alternative(
+            "fastest", "Fastest", eligible[0][0], 0.0, req.maxDetourPct, req.mode, evidence=ev0
+        )
+        balanced_alt = _build_alternative(
+            "balanced", "Balanced", eligible[1][0], eligible[1][1], req.maxDetourPct, req.mode, evidence=ev1
+        )
+        safest_alt = _build_alternative(
+            "safest_available_data",
+            "Safest (Limited Data)",
+            eligible[2][0],
+            eligible[2][1],
+            req.maxDetourPct,
+            req.mode,
+            evidence=ev2,
+        )
+        routes = [fastest_alt, balanced_alt, safest_alt]
+
+
+    logger.info(
+        "Routing request completed | provider: openrouteservice | routes_returned: %d",
+        len(routes),
     )
 
     return RouteCompareResponse(
@@ -335,8 +510,11 @@ def compare_routes(req: RouteCompareRequest) -> RouteCompareResponse:
         destination=req.destination,
         mode=req.mode,
         maxDetourPct=req.maxDetourPct,
+        routes=routes,
         fastest=fastest_alt,
         balanced=balanced_alt,
         safest_available_data=safest_alt,
+        resolved_origin=resolved_origin,
+        resolved_destination=resolved_destination,
         disclaimer=DISCLAIMER,
     )

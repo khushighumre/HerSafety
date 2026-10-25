@@ -35,8 +35,8 @@ export const DEMO_LOCATIONS = [
   { name: "Whitefield ITPL", lat: 12.9857, lng: 77.7368 },
 ];
 
-const A = [12.9756, 77.6068]; // MG Road
-const B = [12.9352, 77.6245]; // Koramangala
+const A: [number, number] = [12.9756, 77.6068]; // MG Road
+const B: [number, number] = [12.9352, 77.6245]; // Koramangala
 
 export const ROUTE_OPTIONS: RouteOption[] = [
   {

@@ -70,11 +70,14 @@ function ActiveJourney() {
   const progress = ((CHECKIN_SECONDS - secondsLeft) / CHECKIN_SECONDS) * 100;
 
   const markers = useMemo(() => {
-    const mid = journeyRoute.coords[Math.floor(journeyRoute.coords.length / 2)];
+    const coords = journeyRoute.coords;
+    const start = coords[0] ?? [12.9756, 77.6068];
+    const mid = coords[Math.floor(coords.length / 2)] ?? start;
+    const end = coords[coords.length - 1] ?? start;
     return [
-      { lat: journeyRoute.coords[0][0], lng: journeyRoute.coords[0][1], label: "Start · MG Road Metro", tone: "primary" as const },
+      { lat: start[0], lng: start[1], label: "Start · MG Road Metro", tone: "primary" as const },
       { lat: mid[0], lng: mid[1], label: deviation ? "Deviation point (simulated)" : "Current position (demo)", tone: (deviation ? "destructive" : "success") as "destructive" | "success" },
-      { lat: journeyRoute.coords[journeyRoute.coords.length - 1][0], lng: journeyRoute.coords[journeyRoute.coords.length - 1][1], label: "Destination · Koramangala", tone: "pink" as const },
+      { lat: end[0], lng: end[1], label: "Destination · Koramangala", tone: "pink" as const },
     ];
   }, [deviation]);
 
@@ -232,7 +235,7 @@ function ActiveJourney() {
           <div className="space-y-4 lg:col-span-3">
             <MapView
               dark={theme === "dark"}
-              center={[journeyRoute.coords[0][0], journeyRoute.coords[0][1]]}
+              center={journeyRoute.coords[0] ?? [12.9756, 77.6068]}
               zoom={13}
               polylines={[{ coords: journeyRoute.coords, color: "#e060a8", weight: 5 }]}
               markers={markers}

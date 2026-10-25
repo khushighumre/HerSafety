@@ -1,3 +1,5 @@
+import type { GeographicEvidence, DemoSafetyContext } from "@/api/routes";
+
 export type TransportMode = "walk" | "car" | "bike";
 
 export type SafetyLevel = "high" | "medium" | "limited";
@@ -27,7 +29,11 @@ export interface RouteOption {
   gaps: RouteGap[];
   notes: string[];
   coords: [number, number][];
+  evidence?: GeographicEvidence | null | undefined;
+  demo_context?: DemoSafetyContext | null | undefined;
 }
+
+
 
 export interface TrustedContact {
   id: string;
@@ -146,6 +152,8 @@ export interface ShareLink {
 export interface MapMarker extends LatLng {
   label?: string;
   tone?: "primary" | "pink" | "warning" | "destructive" | "success";
+  isDemo?: boolean;
+  subLabel?: string;
 }
 
 export interface MapPolyline {
@@ -153,6 +161,7 @@ export interface MapPolyline {
   color: string;
   weight?: number;
   dashed?: boolean;
+  opacity?: number;
 }
 
 export interface MapCircle extends LatLng {

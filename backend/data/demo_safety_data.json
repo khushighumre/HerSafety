@@ -1,0 +1,202 @@
+[
+  {
+    "id": "demo-blr-pt-01",
+    "location": "MG Road Metro Station - Exit A",
+    "latitude": 12.9756,
+    "longitude": 77.6068,
+    "signal_type": "public_transport",
+    "description": "Simulated multi-modal metro transit node for night transit demonstration.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-pt-02",
+    "location": "Trinity Circle Metro Station",
+    "latitude": 12.9729,
+    "longitude": 77.6171,
+    "signal_type": "public_transport",
+    "description": "Synthetic transit access point marker for UI layout testing.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-pt-03",
+    "location": "Indiranagar 100ft Road Bus Stop",
+    "latitude": 12.9719,
+    "longitude": 77.6412,
+    "signal_type": "public_transport",
+    "description": "Simulated BMTC bus shelter node with scheduled night feeder connectivity.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-pt-04",
+    "location": "Koramangala Sony World Signal Bus Bay",
+    "latitude": 12.9348,
+    "longitude": 77.6254,
+    "signal_type": "public_transport",
+    "description": "Simulated busy feeder transit hub point for demo routing comparison.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-as-01",
+    "location": "Cubbon Park Police Assistance Booth (Simulated)",
+    "latitude": 12.9763,
+    "longitude": 77.5929,
+    "signal_type": "assistance_point",
+    "description": "Synthetic 24/7 emergency contact kiosk representation (not a verified physical booth).",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-as-02",
+    "location": "Brigade Road Safe Haven Partner Store (Simulated)",
+    "latitude": 12.9722,
+    "longitude": 77.6074,
+    "signal_type": "assistance_point",
+    "description": "Synthetic designated night assistance and charging point for demo display.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-as-03",
+    "location": "Koramangala 5th Block Community Assistance Desk (Simulated)",
+    "latitude": 12.9345,
+    "longitude": 77.6220,
+    "signal_type": "assistance_point",
+    "description": "Synthetic community assistance booth representation for interface evaluation.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-as-04",
+    "location": "Richmond Town Civic Aid Point (Simulated)",
+    "latitude": 12.9602,
+    "longitude": 77.6008,
+    "signal_type": "assistance_point",
+    "description": "Synthetic public assistance marker for demo route coverage display.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-lt-01",
+    "location": "Residency Road Commercial Promenade",
+    "latitude": 12.9698,
+    "longitude": 77.6045,
+    "signal_type": "lighting",
+    "description": "Simulated high-density smart LED street lighting corridor segment.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-lt-02",
+    "location": "100 Feet Road Indiranagar Pedestrian Walkway",
+    "latitude": 12.9654,
+    "longitude": 77.6401,
+    "signal_type": "lighting",
+    "description": "Simulated continuous illuminated sidewalk demo fixture.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-lt-03",
+    "location": "Koramangala 80ft Road Boulevard",
+    "latitude": 12.9387,
+    "longitude": 77.6241,
+    "signal_type": "lighting",
+    "description": "Simulated well-lit transit boulevard segment for safety scoring test.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-lt-04",
+    "location": "Hosur Road Adugodi Junction",
+    "latitude": 12.9431,
+    "longitude": 77.6119,
+    "signal_type": "lighting",
+    "description": "Simulated high-mast junction lighting node for corridor testing.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cc-01",
+    "location": "Church Street Pedestrian Zone",
+    "latitude": 12.9748,
+    "longitude": 77.6052,
+    "signal_type": "cctv",
+    "description": "Simulated municipal public surveillance coverage representation.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cc-02",
+    "location": "Garuda Mall Junction - Magrath Road",
+    "latitude": 12.9701,
+    "longitude": 77.6095,
+    "signal_type": "cctv",
+    "description": "Simulated junction camera observation point for visual demo.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cc-03",
+    "location": "Indiranagar Metro Underpass",
+    "latitude": 12.9782,
+    "longitude": 77.6389,
+    "signal_type": "cctv",
+    "description": "Simulated transit underpass surveillance coverage representation.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cc-04",
+    "location": "Koramangala Water Tank Junction",
+    "latitude": 12.9298,
+    "longitude": 77.6212,
+    "signal_type": "cctv",
+    "description": "Simulated traffic management camera node for synthetic dataset demonstration.",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cr-01",
+    "location": "Rest House Crescent Lane",
+    "latitude": 12.9734,
+    "longitude": 77.6041,
+    "signal_type": "community_safety_report",
+    "description": "Simulated user feedback: 'Active commercial storefronts open until midnight.'",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cr-02",
+    "location": "Victoria Road Corner",
+    "latitude": 12.9641,
+    "longitude": 77.6148,
+    "signal_type": "community_safety_report",
+    "description": "Simulated user feedback: 'Dimly lit alleyway avoided during late hours.'",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cr-03",
+    "location": "12th Main Road Indiranagar",
+    "latitude": 12.9688,
+    "longitude": 77.6433,
+    "signal_type": "community_safety_report",
+    "description": "Simulated user feedback: 'Frequent foot traffic and evening security presence.'",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  },
+  {
+    "id": "demo-blr-cr-04",
+    "location": "Koramangala 4th Block Park Perimeter",
+    "latitude": 12.9321,
+    "longitude": 77.6297,
+    "signal_type": "community_safety_report",
+    "description": "Simulated user feedback: 'Sparse lighting along park edge after 22:00.'",
+    "source": "NightWise Synthetic Demo Dataset (Not Verified)",
+    "status": "simulated_demo"
+  }
+]
