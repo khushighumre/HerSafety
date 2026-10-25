@@ -41,8 +41,10 @@ class Journey(Base):
     destination_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     destination_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     transport_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="walk")
-    # "active" | "completed" | "cancelled"
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # "planned" | "active" | "completed" | "cancelled"
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    planned_departure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -65,9 +67,12 @@ class CheckIn(Base):
     journey_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("journeys.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="confirmed")
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    responded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     journey: Mapped["Journey"] = relationship("Journey", back_populates="check_ins")

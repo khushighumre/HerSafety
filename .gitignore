@@ -30,6 +30,9 @@ backend/**/__pycache__/
 backend/*.db
 backend/*.db-shm
 backend/*.db-wal
+*.db
+*.db-shm
+*.db-wal
 backend/.env
 backend/uploads/
 *.pyc
