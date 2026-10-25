@@ -35,6 +35,7 @@ backend/*.db-wal
 *.db-wal
 backend/.env
 backend/uploads/
+backend/evidence_store/
 *.pyc
 
 # Editor directories and files

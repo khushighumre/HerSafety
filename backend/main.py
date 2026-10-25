@@ -38,6 +38,8 @@ from routers import routes as routes_router
 from routers import crime_stats as crime_stats_router
 from routers import safety_data as safety_data_router
 from routers import journeys as journeys_router
+from routers import incidents as incidents_router
+from routers import triage as triage_router
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +132,9 @@ app.include_router(safety_data_router.router, prefix="/api/v1")
 
 # Active Journeys API (Phase 2)
 app.include_router(journeys_router.router, prefix="/api/v1")
+
+# Incident Reporting API
+app.include_router(incidents_router.router, prefix="/api/v1")
+
+# Digital Safety Triage API
+app.include_router(triage_router.router, prefix="/api/v1")

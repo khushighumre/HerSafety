@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Fish,
@@ -21,6 +22,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { DIGITAL_THREATS } from "@/data/mock";
 import { brandTitle, pageMeta } from "@/lib/page-meta";
 import { cn } from "@/lib/utils";
+import { submitTriage, type TriageResponse, type ThreatCategory } from "@/api/triage";
+import { ApiError } from "@/lib/api-client";
 
 export const Route = createFileRoute("/digital-safety")({
   head: () => pageMeta(brandTitle("Digital Safety"), "Guided help for harassment, sextortion, impersonation, account compromise and phishing. Demo analysis."),
@@ -35,28 +38,43 @@ const THREAT_ICONS: Record<string, typeof ShieldAlert> = {
   fish: Fish,
 };
 
+const DESCRIPTION_MAX = 2000;
+
 function DigitalSafety() {
   const [selected, setSelected] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [platform, setPlatform] = useState("WhatsApp");
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<{ urgency: number; exposure: number; verdict: string } | null>(null);
 
   const threat = DIGITAL_THREATS.find((t) => t.id === selected);
 
+  const mutation = useMutation<TriageResponse, Error, void>({
+    mutationFn: () =>
+      submitTriage({
+        category: selected as ThreatCategory,
+        platform,
+        description: description.trim(),
+      }),
+    onError: (err) => {
+      const msg =
+        err instanceof ApiError
+          ? `Assessment failed (${err.status}): ${err.detail}`
+          : "Could not reach the backend. Make sure the NightWise API server is running on http://localhost:8000.";
+      toast.error(msg);
+    },
+  });
+
+  const result = mutation.data ?? null;
+  const analyzing = mutation.isPending;
+
+  const canSubmit =
+    !!selected &&
+    description.trim().length > 0 &&
+    description.length <= DESCRIPTION_MAX &&
+    !analyzing;
+
   const analyze = () => {
-    setAnalyzing(true);
-    setResult(null);
-    // Simulated analysis — a real model/API integration comes later.
-    setTimeout(() => {
-      setAnalyzing(false);
-      setResult({
-        urgency: description.length > 120 ? 82 : 61,
-        exposure: platform === "Email" ? 45 : 70,
-        verdict:
-          "Demo assessment: based only on your text — no content was uploaded or sent anywhere. Recommended actions below are general best practice, not legal or medical advice.",
-      });
-    }, 1100);
+    mutation.reset();
+    mutation.mutate();
   };
 
   return (
@@ -80,7 +98,7 @@ function DigitalSafety() {
               key={t.id}
               onClick={() => {
                 setSelected(t.id);
-                setResult(null);
+                mutation.reset();
               }}
               className={cn(
                 "rounded-2xl border bg-card p-4 text-left shadow-[var(--shadow-card)] transition-all hover:-translate-y-0.5",
@@ -124,11 +142,24 @@ function DigitalSafety() {
                   rows={5}
                   placeholder="Describe in your own words. Don't include passwords, OTPs or intimate content."
                 />
-                <p className="text-[11px] text-muted-foreground">Stays in your browser — demo analysis is simulated.</p>
+                <p className="text-[11px] text-muted-foreground">Sent to the local backend only — not stored or shared.</p>
               </div>
-              <Button className="w-full rounded-xl gap-2" onClick={analyze} disabled={analyzing || !description.trim()}>
-                <ScanSearch className="h-4 w-4" /> {analyzing ? "Analyzing (demo)…" : "Run demo analysis"}
+              <p className="text-[11px] text-muted-foreground">
+                {description.length}/{DESCRIPTION_MAX} characters
+              </p>
+              {description.length > DESCRIPTION_MAX && (
+                <p className="text-[11px] text-destructive">Description must be 2,000 characters or fewer.</p>
+              )}
+              <Button className="w-full rounded-xl gap-2" onClick={analyze} disabled={!canSubmit}>
+                <ScanSearch className="h-4 w-4" /> {analyzing ? "Analyzing…" : "Run demo analysis"}
               </Button>
+              {mutation.isError && (
+                <p className="rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
+                  {mutation.error instanceof ApiError
+                    ? `Error ${mutation.error.status}: ${mutation.error.detail}`
+                    : "Backend unavailable — start the NightWise API server and try again."}
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -136,19 +167,31 @@ function DigitalSafety() {
             {analyzing && <Skeleton className="h-48 rounded-2xl" />}
             {!analyzing && result && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex-row items-center justify-between">
                   <CardTitle className="font-display text-base">Demo analysis result</CardTitle>
+                  <Badge variant="secondary" className="text-[10px]">{result.confidence}</Badge>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <p className="mb-1 flex justify-between text-xs font-medium"><span>Urgency (simulated)</span><span className="font-bold">{result.urgency}/100</span></p>
-                    <Progress value={result.urgency} className="h-2" />
+                    <p className="mb-1 flex justify-between text-xs font-medium">
+                      <span>Urgency (demo indicator)</span>
+                      <span className="font-bold">{result.urgency_score}/100</span>
+                    </p>
+                    <Progress value={result.urgency_score} className="h-2" />
                   </div>
                   <div>
-                    <p className="mb-1 flex justify-between text-xs font-medium"><span>Exposure risk (simulated)</span><span className="font-bold">{result.exposure}/100</span></p>
-                    <Progress value={result.exposure} className="h-2" />
+                    <p className="mb-1 flex justify-between text-xs font-medium">
+                      <span>Exposure risk (demo indicator)</span>
+                      <span className="font-bold">{result.exposure_score}/100</span>
+                    </p>
+                    <Progress value={result.exposure_score} className="h-2" />
                   </div>
-                  <p className="rounded-xl bg-accent/60 p-3 text-xs leading-relaxed text-accent-foreground">{result.verdict}</p>
+                  <p className="rounded-xl bg-accent/60 p-3 text-xs leading-relaxed text-accent-foreground">
+                    {result.verdict}
+                  </p>
+                  <p className="rounded-xl border border-dashed p-3 text-[11px] leading-relaxed text-muted-foreground">
+                    {result.disclaimer}
+                  </p>
                 </CardContent>
               </Card>
             )}
@@ -158,7 +201,7 @@ function DigitalSafety() {
               </CardHeader>
               <CardContent>
                 <ol className="space-y-2.5">
-                  {threat.recommendedActions.map((a, i) => (
+                  {(result?.recommended_actions ?? threat.recommendedActions).map((a, i) => (
                     <li key={i} className="flex items-start gap-2.5 text-sm">
                       <Badge variant="secondary" className="mt-0.5 h-5 w-5 shrink-0 justify-center rounded-full p-0 text-[10px] font-bold">{i + 1}</Badge>
                       <span className="leading-relaxed">{a}</span>
