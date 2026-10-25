@@ -510,3 +510,10 @@ class EvidenceRead(BaseModel):
     sha256: str
     hash_verified: bool
     added_at: datetime
+
+
+class EvidenceVerifyResult(BaseModel):
+    evidence_id: int
+    stored_sha256: str
+    computed_sha256: str
+    match: bool

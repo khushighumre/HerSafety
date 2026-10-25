@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BatteryCharging,
   BellRing,
+  ExternalLink,
   EyeOff,
   FileLock2,
   Footprints,
@@ -11,7 +12,9 @@ import {
   Map,
   MessageSquareLock,
   Navigation,
+  PhoneCall,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Smartphone,
   Users,
@@ -31,6 +34,49 @@ export const Route = createFileRoute("/dashboard")({
   head: () => pageMeta(brandTitle("Dashboard"), "Your safety overview: journeys, trusted circle activity, stats and tips. Demo data."),
   component: Dashboard,
 });
+
+const HELPLINES = [
+  {
+    number: "112",
+    title: "112 — National Emergency Response",
+    badge: "Primary Emergency",
+    tone: "border-destructive/40 bg-destructive/10 text-destructive-foreground hover:bg-destructive/15 focus-visible:ring-destructive",
+    badgeTone: "bg-destructive text-destructive-foreground",
+    description: "All-in-one national emergency support (police, fire, ambulance). Available 24/7 pan-India.",
+    source: "https://112.gov.in/",
+    urgent: true,
+  },
+  {
+    number: "181",
+    title: "181 — Women Helpline",
+    badge: "Women Support",
+    tone: "border-pink/40 bg-pink/10 text-pink-foreground hover:bg-pink/15 focus-visible:ring-pink",
+    badgeTone: "bg-pink text-pink-foreground",
+    description: "24/7 emergency response and advisory support for women facing distress or violence.",
+    source: "https://wcd.gov.in/women/help",
+    urgent: false,
+  },
+  {
+    number: "1091",
+    title: "1091 — Women in Distress",
+    badge: "Distress Helpline",
+    tone: "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15 focus-visible:ring-primary",
+    badgeTone: "bg-primary text-primary-foreground",
+    description: "Dedicated police-linked assistance for women encountering harassment or danger.",
+    source: "https://womenchild.maharashtra.gov.in/en/support-helpline",
+    urgent: false,
+  },
+  {
+    number: "1930",
+    title: "1930 — Cyber Crime Helpline",
+    badge: "Cyber Safety",
+    tone: "border-warning/40 bg-warning/10 text-warning-foreground hover:bg-warning/15 focus-visible:ring-warning",
+    badgeTone: "bg-warning text-warning-foreground",
+    description: "National reporting portal helpline for online harassment, extortion, and cyber fraud.",
+    source: "https://cybercrime.gov.in/",
+    urgent: false,
+  },
+];
 
 const TIP_ICONS: Record<SafetyTip["icon"], typeof Shield> = {
   smartphone: Smartphone,
@@ -66,6 +112,71 @@ function Dashboard() {
 
   return (
     <AppLayout>
+      {/* Safety Helplines — India */}
+      <section
+        aria-labelledby="helpline-banner-heading"
+        className="mb-6 overflow-hidden rounded-2xl border border-destructive/30 bg-destructive/5 p-4 shadow-sm md:p-5"
+      >
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-destructive text-white shadow-sm">
+              <PhoneCall className="h-4 w-4" />
+            </span>
+            <div>
+              <h2 id="helpline-banner-heading" className="font-display text-base font-bold tracking-tight text-foreground">
+                Safety Helplines — India
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Official national and state emergency contacts. Tapping a number opens your phone's dialer.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" />
+            <span>External government helplines · Not operated by NightWise</span>
+          </div>
+        </div>
+
+        <div className="mt-3.5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {HELPLINES.map((h) => (
+            <a
+              key={h.number}
+              href={`tel:${h.number}`}
+              aria-label={`Call ${h.title}: ${h.number}`}
+              className={cn(
+                "group relative flex flex-col justify-between rounded-xl border p-3 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2",
+                h.tone,
+              )}
+            >
+              <div>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="font-display text-2xl font-black tracking-tight text-foreground group-hover:underline">
+                    {h.number}
+                  </span>
+                  <Badge variant="secondary" className={cn("text-[10px] font-semibold", h.badgeTone)}>
+                    {h.badge}
+                  </Badge>
+                </div>
+                <p className="mt-1 font-display text-xs font-semibold leading-tight text-foreground">
+                  {h.title}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  {h.description}
+                </p>
+              </div>
+              <div className="mt-2.5 flex items-center justify-between border-t border-current/10 pt-2 text-[10px] font-medium opacity-80 group-hover:opacity-100">
+                <span className="flex items-center gap-1">
+                  <PhoneCall className="h-3 w-3" /> Tap to call {h.number}
+                </span>
+                <span className="flex items-center gap-0.5 text-muted-foreground underline-offset-2 hover:underline" onClick={(e) => { e.stopPropagation(); window.open(h.source, "_blank", "noopener,noreferrer"); }}>
+                  Info <ExternalLink className="h-2.5 w-2.5" />
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+      </section>
+
       <PageHeader
         title={`${greeting()}, ${DEMO_USER.name}`}
         description="Here's your safety snapshot. Everything below is demo data — nothing is shared or sent anywhere."
@@ -181,7 +292,7 @@ function Dashboard() {
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle className="font-display text-base">Safety tips</CardTitle>
-            <Badge variant="secondary" className="text-[10px]">Demo content</Badge>
+            <Badge variant="secondary" className="text-[10px]">Practical guidance</Badge>
           </CardHeader>
           <CardContent className="grid gap-2.5 sm:grid-cols-2">
             {SAFETY_TIPS.map((tip) => {
