@@ -10,6 +10,7 @@ Tests for Phase 2 Active Journeys:
 """
 
 import sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -510,5 +511,252 @@ def test_check_in_rejected_on_cancelled_journey():
     assert ci_res.status_code == 400
     assert "active" in ci_res.json().get("detail", "").lower()
     assert "cancelled" in ci_res.json().get("detail", "").lower()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2, Part 4: Missed Safety Check-in Detection & Overdue Tests
+# ---------------------------------------------------------------------------
+
+def test_check_in_status_active_within_90s_not_overdue():
+    """Active journey less than 90 seconds since start is not overdue."""
+    now = datetime.now(timezone.utc)
+    started_40s_ago = now - timedelta(seconds=40)
+
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="MG Road",
+            destination_name="Indiranagar",
+            transport_mode="walk",
+            status="active",
+            started_at=started_40s_ago,
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        journey_id = journey.id
+
+    res = client.get(f"/api/v1/journeys/{journey_id}/check-in-status")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["journey_id"] == journey_id
+    assert data["journey_status"] == "active"
+    assert data["is_overdue"] is False
+    assert data["checkin_required"] is True
+    assert data["seconds_overdue"] == 0
+    assert 40 <= data["seconds_remaining"] <= 52
+    assert data["checkin_interval_seconds"] == 90
+    assert data["status_label"] in ("up_to_date", "due_soon")
+    assert data["last_checkin_at"] is not None
+    assert data["next_checkin_due_at"] is not None
+
+
+def test_check_in_status_exactly_90s_boundary():
+    """At exactly 90.0 seconds, journey is due but not yet overdue (overdue requires > 90s)."""
+    now = datetime.now(timezone.utc)
+    started_90s_ago = now - timedelta(seconds=90)
+
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="Point A",
+            destination_name="Point B",
+            transport_mode="walk",
+            status="active",
+            started_at=started_90s_ago,
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        journey_id = journey.id
+
+    res = client.get(f"/api/v1/journeys/{journey_id}/check-in-status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_overdue"] is False or data["seconds_overdue"] <= 1
+    assert data["checkin_required"] is True
+
+
+def test_check_in_status_more_than_90s_is_overdue():
+    """Active journey more than 90 seconds without check-in is marked overdue."""
+    now = datetime.now(timezone.utc)
+    started_125s_ago = now - timedelta(seconds=125)
+
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="Point C",
+            destination_name="Point D",
+            transport_mode="walk",
+            status="active",
+            started_at=started_125s_ago,
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        journey_id = journey.id
+
+    res = client.get(f"/api/v1/journeys/{journey_id}/check-in-status")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["journey_id"] == journey_id
+    assert data["journey_status"] == "active"
+    assert data["is_overdue"] is True
+    assert data["checkin_required"] is True
+    assert 30 <= data["seconds_overdue"] <= 40
+    assert data["seconds_remaining"] == 0
+    assert data["status_label"] == "overdue"
+
+
+def test_recent_check_in_clears_overdue_status_immediately():
+    """Recording a check-in on an overdue journey immediately clears overdue status."""
+    now = datetime.now(timezone.utc)
+    started_150s_ago = now - timedelta(seconds=150)
+
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="Point E",
+            destination_name="Point F",
+            transport_mode="walk",
+            status="active",
+            started_at=started_150s_ago,
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        journey_id = journey.id
+
+    # Verify initially overdue
+    overdue_res = client.get(f"/api/v1/journeys/{journey_id}/check-in-status")
+    assert overdue_res.json()["is_overdue"] is True
+    assert overdue_res.json()["seconds_overdue"] > 0
+
+    # User taps "I'm Okay" (check-in recorded)
+    ci_res = client.post(f"/api/v1/journeys/{journey_id}/check-ins", json={"note": "I'm okay"})
+    assert ci_res.status_code == 201
+
+    # Overdue is cleared immediately
+    cleared_res = client.get(f"/api/v1/journeys/{journey_id}/check-in-status")
+    assert cleared_res.status_code == 200
+    cleared_data = cleared_res.json()
+    assert cleared_data["is_overdue"] is False
+    assert cleared_data["seconds_overdue"] == 0
+    assert cleared_data["seconds_remaining"] > 80
+    assert cleared_data["status_label"] == "up_to_date"
+
+
+def test_check_in_status_repeated_reads_are_idempotent():
+    """Querying check-in status repeatedly never alters timestamps or database records."""
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="Repeated Read Origin",
+            destination_name="Repeated Read Dest",
+            transport_mode="walk",
+            status="active",
+            started_at=now - timedelta(seconds=20),
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        j_id = journey.id
+
+    r1 = client.get(f"/api/v1/journeys/{j_id}/check-in-status").json()
+    r2 = client.get(f"/api/v1/journeys/{j_id}/check-in-status").json()
+
+    assert r1["journey_id"] == r2["journey_id"]
+    assert r1["is_overdue"] == r2["is_overdue"]
+    assert r1["last_checkin_at"] == r2["last_checkin_at"]
+    assert r1["next_checkin_due_at"] == r2["next_checkin_due_at"]
+
+
+def test_check_in_status_non_active_journeys_never_overdue():
+    """Planned, completed, and cancelled journeys are never marked overdue."""
+    now = datetime.now(timezone.utc)
+    old_time = now - timedelta(seconds=500)
+
+    # Planned journey
+    p_res = client.post(
+        "/api/v1/journeys",
+        json={"origin": "Origin P", "destination": "Dest P", "status": "planned"},
+    )
+    p_id = p_res.json()["id"]
+    p_status = client.get(f"/api/v1/journeys/{p_id}/check-in-status").json()
+    assert p_status["is_overdue"] is False
+    assert p_status["checkin_required"] is False
+    assert p_status["seconds_overdue"] == 0
+    assert p_status["status_label"] == "not_required"
+
+    # Completed journey (even if started hours ago)
+    with SessionLocal() as db:
+        c_j = Journey(
+            origin_name="Origin C",
+            destination_name="Dest C",
+            transport_mode="walk",
+            status="completed",
+            started_at=old_time,
+            ended_at=now,
+        )
+        db.add(c_j)
+        db.commit()
+        db.refresh(c_j)
+        c_id = c_j.id
+
+    c_status = client.get(f"/api/v1/journeys/{c_id}/check-in-status").json()
+    assert c_status["is_overdue"] is False
+    assert c_status["checkin_required"] is False
+    assert c_status["seconds_overdue"] == 0
+    assert c_status["status_label"] == "not_required"
+
+    # Cancelled journey (even if started hours ago)
+    with SessionLocal() as db:
+        can_j = Journey(
+            origin_name="Origin Can",
+            destination_name="Dest Can",
+            transport_mode="walk",
+            status="cancelled",
+            started_at=old_time,
+            ended_at=now,
+        )
+        db.add(can_j)
+        db.commit()
+        db.refresh(can_j)
+        can_id = can_j.id
+
+    can_status = client.get(f"/api/v1/journeys/{can_id}/check-in-status").json()
+    assert can_status["is_overdue"] is False
+    assert can_status["checkin_required"] is False
+    assert can_status["seconds_overdue"] == 0
+    assert can_status["status_label"] == "not_required"
+
+
+def test_check_in_status_unknown_journey_returns_404():
+    """Requesting check-in status for non-existent journey ID returns 404."""
+    res = client.get("/api/v1/journeys/999999/check-in-status")
+    assert res.status_code == 404
+    assert "not found" in res.json().get("detail", "").lower()
+
+
+def test_check_in_status_with_naive_database_timestamps():
+    """Handles offset-naive datetimes from SQLite safely without TypeError."""
+    # SQLite naive datetime (stored without tzinfo in UTC)
+    naive_dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=110)
+    with SessionLocal() as db:
+        journey = Journey(
+            origin_name="Naive Origin",
+            destination_name="Naive Dest",
+            transport_mode="walk",
+            status="active",
+            started_at=naive_dt,
+        )
+        db.add(journey)
+        db.commit()
+        db.refresh(journey)
+        j_id = journey.id
+
+    res = client.get(f"/api/v1/journeys/{j_id}/check-in-status")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["is_overdue"] is True
+    assert data["seconds_overdue"] >= 15
 
 

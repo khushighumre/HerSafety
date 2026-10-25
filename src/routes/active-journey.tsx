@@ -50,16 +50,22 @@ import {
   startJourney,
   createCheckIn,
   fetchCheckIns,
+  fetchCheckInStatus,
   type Journey,
   type JourneyTravelMode,
   type JourneyStatus,
   type CheckIn,
+  type CheckInStatus,
 } from "@/api/journeys";
+import { compareRoutes } from "@/api/routes";
 import {
   CHECKIN_INTERVAL_SECONDS,
   computeJourneyTimers,
   formatDuration,
   getEstimatedRouteDuration,
+  formatLocalTime,
+  formatDateTime,
+  calculateEstimatedArrival,
 } from "@/lib/journey-timer";
 import { TRUSTED_CONTACTS } from "@/data/mock";
 import { useTheme } from "@/lib/theme";
@@ -169,6 +175,23 @@ function ActiveJourney() {
   const checkIns = checkInsQuery.data ?? [];
   const latestCheckIn = checkIns.length > 0 ? checkIns[0] : null;
 
+  // Persistent check-in and overdue status from backend (polled only while active)
+  const checkInStatusQuery = useQuery({
+    queryKey: ["check-in-status", activeJourney?.id],
+    queryFn: () => (activeJourney ? fetchCheckInStatus(activeJourney.id) : null),
+    enabled: !!activeJourney,
+    // Poll every 6s only when active; automatically disabled for planned/completed/cancelled
+    refetchInterval: activeJourney?.status === "active" ? 6000 : false,
+    staleTime: 4000,
+  });
+
+  const checkInStatus = checkInStatusQuery.data ?? null;
+  const isOverdue =
+    !checkInStatusQuery.isLoading &&
+    !checkInStatusQuery.isError &&
+    activeJourney?.status === "active" &&
+    (checkInStatus?.is_overdue ?? false);
+
   // Sync selected journey to localStorage
   useEffect(() => {
     if (activeJourney) {
@@ -188,10 +211,64 @@ function ActiveJourney() {
     );
   }, [activeJourney?.started_at, activeJourney?.status, activeJourney?.ended_at, nowMs]);
 
-  // Route estimate preserved strictly as a static estimate (separate from running timers)
-  const routeEstimate = useMemo(() => {
-    return getEstimatedRouteDuration(activeJourney?.travel_mode ?? "walk");
-  }, [activeJourney?.travel_mode]);
+  // Live route query to fetch actual route duration, distance, and polyline
+  const routeQuery = useQuery({
+    queryKey: [
+      "journey-route",
+      activeJourney?.origin,
+      activeJourney?.destination,
+      activeJourney?.travel_mode,
+    ],
+    queryFn: () => {
+      if (!activeJourney?.origin || !activeJourney?.destination) return null;
+      return compareRoutes({
+        origin: activeJourney.origin,
+        destination: activeJourney.destination,
+        mode: activeJourney.travel_mode || "walk",
+      });
+    },
+    enabled: !!activeJourney?.origin && !!activeJourney?.destination,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const selectedRoute = useMemo(() => {
+    const data = routeQuery.data;
+    if (!data) return null;
+    return (
+      data.routes?.[0] ??
+      data.balanced ??
+      data.fastest ??
+      data.safest_available_data ??
+      null
+    );
+  }, [routeQuery.data]);
+
+  const routeDurationMin: number | null = useMemo(() => {
+    if (!selectedRoute || typeof selectedRoute.durationMin !== "number" || selectedRoute.durationMin <= 0) {
+      return null;
+    }
+    return selectedRoute.durationMin;
+  }, [selectedRoute]);
+
+  // Derived estimated arrival and duration based on actual route duration and current local time
+  const arrivalResult = useMemo(() => {
+    if (!activeJourney) {
+      return {
+        hasValidEstimate: false,
+        durationLabel: "Estimated duration unavailable",
+        arrivalLabel: "Est. arrival",
+        formattedArrival: "Arrival time unavailable",
+        isScheduled: false,
+      };
+    }
+    return calculateEstimatedArrival({
+      nowMs,
+      durationMinutes: routeDurationMin,
+      status: activeJourney.status,
+      plannedDepartureTime: activeJourney.planned_departure_time,
+      endedAt: activeJourney.ended_at,
+    });
+  }, [activeJourney, nowMs, routeDurationMin]);
 
   // Create journey mutation
   const createMutation = useMutation({
@@ -221,6 +298,7 @@ function ActiveJourney() {
     mutationFn: startJourney,
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      queryClient.invalidateQueries({ queryKey: ["check-in-status"] });
       toast.success("Journey started", {
         description: `Timer active for ${updated.origin} → ${updated.destination}`,
       });
@@ -237,6 +315,7 @@ function ActiveJourney() {
     mutationFn: completeJourney,
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      queryClient.invalidateQueries({ queryKey: ["check-in-status"] });
       toast.success("Journey completed safely", {
         description: `Arrived at ${updated.destination}. Total time active: ${formatDuration(timers.elapsedSeconds)}`,
       });
@@ -253,6 +332,7 @@ function ActiveJourney() {
     mutationFn: cancelJourney,
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ["journeys"] });
+      queryClient.invalidateQueries({ queryKey: ["check-in-status"] });
       toast.warning("Journey cancelled", {
         description: `Journey #${updated.id} was marked as cancelled.`,
       });
@@ -272,6 +352,7 @@ function ActiveJourney() {
     },
     onSuccess: (newCheckIn) => {
       queryClient.invalidateQueries({ queryKey: ["check-ins", activeJourney?.id] });
+      queryClient.invalidateQueries({ queryKey: ["check-in-status", activeJourney?.id] });
       toast.success("Check-in confirmed", {
         description: `Status: ${newCheckIn.status}. Response persisted to SQLite.`,
       });
@@ -335,12 +416,17 @@ function ActiveJourney() {
       },
     ];
 
+    const polyline =
+      selectedRoute?.coords && selectedRoute.coords.length > 0
+        ? (selectedRoute.coords as [number, number][])
+        : ([originCoords, midCoords, destCoords] as [number, number][]);
+
     return {
       center: originCoords,
       markers,
-      polyline: [originCoords, midCoords, destCoords] as [number, number][],
+      polyline,
     };
-  }, [activeJourney, deviation]);
+  }, [activeJourney, deviation, selectedRoute]);
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -381,6 +467,16 @@ function ActiveJourney() {
         description="Plan, monitor, and transition active journey lifecycles. All states and timestamps persist in SQLite."
         actions={
           <div className="flex items-center gap-2">
+            {/* Live Clock: User's Local Time */}
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border/80 bg-card/80 text-xs font-mono font-medium shadow-xs"
+              title="Current local time (live clock, updates every second)"
+            >
+              <Clock className="h-3.5 w-3.5 text-primary animate-pulse" />
+              <span className="text-muted-foreground text-[10px] uppercase font-sans font-semibold">Local</span>
+              <span className="text-foreground">{formatLocalTime(nowMs, true)}</span>
+            </div>
+
             <Button
               size="sm"
               variant={showCreateForm ? "outline" : "default"}
@@ -705,11 +801,18 @@ function ActiveJourney() {
                     </div>
                   </div>
 
-                  {/* Metadata Row: Travel Mode, Est Duration, Time Active */}
-                  <div className="grid grid-cols-3 gap-2 text-xs">
+                  {/* Metadata Row: Mode, Est Duration, Est Arrival, Time Active */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div className="rounded-lg border p-2.5 bg-card">
                       <span className="text-muted-foreground text-[10px] block uppercase font-medium flex items-center gap-1">
-                        <Footprints className="h-3 w-3 text-primary" /> Mode
+                        {activeJourney.travel_mode === "bike" ? (
+                          <Bike className="h-3 w-3 text-primary" />
+                        ) : activeJourney.travel_mode === "car" ? (
+                          <Car className="h-3 w-3 text-primary" />
+                        ) : (
+                          <Footprints className="h-3 w-3 text-primary" />
+                        )}
+                        Mode
                       </span>
                       <span className="font-semibold capitalize mt-0.5 block truncate">{activeJourney.travel_mode}</span>
                     </div>
@@ -718,8 +821,40 @@ function ActiveJourney() {
                       <span className="text-muted-foreground text-[10px] block uppercase font-medium flex items-center gap-1">
                         <Clock className="h-3 w-3 text-primary" /> Est. duration
                       </span>
-                      <span className="font-semibold mt-0.5 block truncate" title="Estimated route travel time">
-                        {routeEstimate.label}
+                      <span
+                        className={cn(
+                          "font-semibold mt-0.5 block truncate",
+                          !routeQuery.isLoading && !routeDurationMin && "text-muted-foreground font-normal text-[11px]",
+                        )}
+                        title={
+                          routeDurationMin
+                            ? `Live route duration: ${Math.round(routeDurationMin)} min`
+                            : "Estimated duration unavailable"
+                        }
+                      >
+                        {routeQuery.isLoading ? "Calculating..." : arrivalResult.durationLabel}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg border p-2.5 bg-card">
+                      <span className="text-muted-foreground text-[10px] block uppercase font-medium flex items-center gap-1">
+                        <Navigation className="h-3 w-3 text-primary" />
+                        <span className="truncate">{arrivalResult.arrivalLabel}</span>
+                      </span>
+                      <span
+                        className={cn(
+                          "font-semibold mt-0.5 block truncate",
+                          !routeQuery.isLoading && !arrivalResult.hasValidEstimate && "text-muted-foreground font-normal text-[11px]",
+                        )}
+                        title={
+                          arrivalResult.hasValidEstimate
+                            ? arrivalResult.isScheduled
+                              ? "Calculated from scheduled departure time"
+                              : "Calculated from current local time + route duration"
+                            : "Estimated arrival unavailable"
+                        }
+                      >
+                        {routeQuery.isLoading ? "Calculating..." : arrivalResult.formattedArrival}
                       </span>
                     </div>
 
@@ -743,6 +878,14 @@ function ActiveJourney() {
                   <div className="rounded-lg bg-muted/40 border px-3 py-2 text-xs space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground flex items-center gap-1.5">
+                        <Clock className="h-3 w-3 text-primary" /> Current local time
+                      </span>
+                      <span className="font-mono font-medium text-foreground">
+                        {formatLocalTime(nowMs, true)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-border/50 pt-1">
+                      <span className="text-muted-foreground flex items-center gap-1.5">
                         <Calendar className="h-3 w-3 text-muted-foreground" />
                         {activeJourney.status === "active" ? "Started at" : "Created at"}
                       </span>
@@ -763,7 +906,7 @@ function ActiveJourney() {
                     {activeJourney.planned_departure_time && !activeJourney.ended_at && (
                       <div className="flex items-center justify-between border-t border-border/50 pt-1">
                         <span className="text-muted-foreground flex items-center gap-1.5">
-                          <Clock className="h-3 w-3 text-amber-500" /> Planned departure
+                          <Clock className="h-3 w-3 text-amber-500" /> Scheduled departure
                         </span>
                         <span className="font-medium text-foreground">
                           {formatDate(activeJourney.planned_departure_time)}
@@ -788,6 +931,31 @@ function ActiveJourney() {
                         </span>
                       )}
                     </div>
+                    {/* Safety Check-in Status (derived from backend check-in status endpoint) */}
+                    {activeJourney.status === "active" && (
+                      <div className="flex items-center justify-between border-t border-border/50 pt-1">
+                        <span className="text-muted-foreground flex items-center gap-1.5">
+                          <Timer className="h-3 w-3 text-primary" /> Check-in status
+                        </span>
+                        {checkInStatusQuery.isLoading ? (
+                          <span className="text-muted-foreground text-[11px] flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                          </span>
+                        ) : isOverdue ? (
+                          <Badge className="bg-destructive/15 text-destructive border-destructive/30 text-[10px] px-1.5 py-0 font-medium">
+                            Check-in overdue (+{formatDuration(checkInStatus?.seconds_overdue ?? 0)})
+                          </Badge>
+                        ) : checkInStatus?.status_label === "due_soon" || timers.checkinDue ? (
+                          <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-[10px] px-1.5 py-0 font-medium">
+                            Check-in due soon ({checkInStatus?.seconds_remaining ?? timers.secondsUntilCheckin}s)
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0 font-medium">
+                            Check-in up to date ({checkInStatus?.seconds_remaining ?? timers.secondsUntilCheckin}s)
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Periodic Check-in countdown: only active while journey is ongoing */}
@@ -898,12 +1066,53 @@ function ActiveJourney() {
               </Card>
             )}
 
-            {/* Check-in Due Alert (Active Journeys only) */}
-            {timers.checkinDue && activeJourney?.status === "active" && (
-              <div className="rounded-2xl border border-warning/50 bg-warning/10 p-4">
-                <p className="flex items-center gap-2 text-sm font-semibold text-warning-foreground">
-                  <Timer className="h-4 w-4" /> Check-in due
+            {/* Check-in Overdue Alert (Active Journeys only) */}
+            {isOverdue && activeJourney?.status === "active" && (
+              <div className="rounded-2xl border border-destructive/40 bg-destructive/10 p-4 space-y-2 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-destructive">
+                    <AlertCircle className="h-4 w-4" /> Check-in overdue
+                  </p>
+                  <Badge variant="destructive" className="text-xs px-2 py-0.5 font-mono">
+                    +{formatDuration(checkInStatus?.seconds_overdue ?? 0)}
+                  </Badge>
+                </div>
+                <p className="text-xs text-destructive/90 leading-relaxed">
+                  Periodic safety interval of 90 seconds was exceeded without a qualifying check-in. Confirm you are safe to clear this notice.
                 </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Notice: This is a missed periodic check-in notice, not an emergency dispatch. No automated SOS or alerts have been dispatched.
+                </p>
+                <Button
+                  size="sm"
+                  className="mt-2 w-full rounded-lg gap-2 bg-destructive hover:bg-destructive/90 text-white font-medium shadow-xs"
+                  onClick={sayOkay}
+                  disabled={isActionPending}
+                >
+                  {checkInMutation.isPending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Confirming safety...
+                    </>
+                  ) : (
+                    <>
+                      <Hand className="h-4 w-4" /> I'm Okay — Clear Overdue
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Check-in Due Soon Alert (Active Journeys only when not overdue) */}
+            {!isOverdue && (checkInStatus?.status_label === "due_soon" || timers.checkinDue) && activeJourney?.status === "active" && (
+              <div className="rounded-2xl border border-warning/50 bg-warning/10 p-4 space-y-1.5 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-warning-foreground">
+                    <Timer className="h-4 w-4" /> Check-in due soon
+                  </p>
+                  <Badge variant="outline" className="border-warning/60 text-warning-foreground text-[11px] px-2 py-0.5 font-mono">
+                    {timers.checkinDue ? "Due now" : `${checkInStatus?.seconds_remaining ?? timers.secondsUntilCheckin}s remaining`}
+                  </Badge>
+                </div>
                 <p className="mt-1 text-xs text-warning-foreground/80">
                   Periodic safety interval reached. Confirm you are safe to reset the check-in timer.
                 </p>
@@ -974,7 +1183,10 @@ function ActiveJourney() {
                   {activeJourney.status === "active" && (
                     <>
                       <Button
-                        className="rounded-xl gap-2"
+                        className={cn(
+                          "rounded-xl gap-2 font-medium",
+                          isOverdue && "bg-destructive hover:bg-destructive/90 text-white shadow-xs",
+                        )}
                         onClick={sayOkay}
                         disabled={isActionPending}
                       >
@@ -984,7 +1196,7 @@ function ActiveJourney() {
                           </>
                         ) : (
                           <>
-                            <Hand className="h-4 w-4" /> I'm Okay
+                            <Hand className="h-4 w-4" /> {isOverdue ? "I'm Okay — Clear Overdue" : "I'm Okay"}
                           </>
                         )}
                       </Button>

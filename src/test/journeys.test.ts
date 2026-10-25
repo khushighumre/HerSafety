@@ -8,6 +8,7 @@ import {
   cancelJourney,
   createCheckIn,
   fetchCheckIns,
+  fetchCheckInStatus,
 } from "@/api/journeys";
 
 describe("journeys API client", () => {
@@ -276,6 +277,39 @@ describe("journeys API client", () => {
     expect(checkIns[1]?.id).toBe(1);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/v1\/journeys\/10\/check-ins$/),
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
+  it("fetches check-in status via GET /api/v1/journeys/:id/check-in-status", async () => {
+    const mockStatus = {
+      journey_id: 15,
+      journey_status: "active",
+      is_overdue: true,
+      checkin_required: true,
+      last_checkin_at: "2026-10-25T20:30:00Z",
+      next_checkin_due_at: "2026-10-25T20:31:30Z",
+      seconds_overdue: 45,
+      seconds_remaining: 0,
+      checkin_interval_seconds: 90,
+      status_label: "overdue",
+    };
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockStatus,
+    });
+
+    const status = await fetchCheckInStatus(15);
+    expect(status.journey_id).toBe(15);
+    expect(status.is_overdue).toBe(true);
+    expect(status.seconds_overdue).toBe(45);
+    expect(status.status_label).toBe("overdue");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/v1\/journeys\/15\/check-in-status$/),
       expect.objectContaining({
         method: "GET",
       }),

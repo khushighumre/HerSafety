@@ -123,3 +123,129 @@ export function getEstimatedRouteDuration(mode: string): { durationMinutes: numb
       return { durationMinutes: 26, label: "~26 mins" };
   }
 }
+
+/**
+ * Format timestamp as localized time string (e.g. "04:42:15 PM" or "16:42:15").
+ */
+export function formatLocalTime(
+  dateOrMs: number | Date | string | null | undefined,
+  includeSeconds = true,
+): string {
+  if (!dateOrMs) return "--:--";
+  const d = typeof dateOrMs === "number" ? new Date(dateOrMs) : new Date(dateOrMs);
+  if (isNaN(d.getTime())) return "--:--";
+  return d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(includeSeconds ? { second: "2-digit" } : {}),
+  });
+}
+
+/**
+ * Format timestamp as localized short date and time (e.g. "Oct 25, 08:30 PM").
+ */
+export function formatDateTime(dateOrMs: number | Date | string | null | undefined): string {
+  if (!dateOrMs) return "--";
+  const d = typeof dateOrMs === "number" ? new Date(dateOrMs) : new Date(dateOrMs);
+  if (isNaN(d.getTime())) return "--";
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export interface ArrivalCalculationParams {
+  nowMs: number;
+  durationMinutes?: number | null | undefined;
+  status: string; // "planned" | "active" | "completed" | "cancelled"
+  plannedDepartureTime?: string | null | undefined;
+  endedAt?: string | null | undefined;
+}
+
+export interface ArrivalCalculationResult {
+  hasValidEstimate: boolean;
+  durationLabel: string;
+  arrivalLabel: string;
+  formattedArrival: string;
+  formattedDeparture?: string | null;
+  isScheduled: boolean;
+}
+
+/**
+ * Calculates estimated arrival time and trip duration from actual route duration and local clock.
+ * - If route duration is unavailable (null, undefined, <= 0), displays "Estimated duration unavailable"
+ *   and does not invent an arrival time.
+ * - For a planned journey with a scheduled departure time, calculates arrival from the scheduled
+ *   departure and labels it clearly as scheduled.
+ * - For an active journey, calculates arrival from current local time plus trip duration.
+ */
+export function calculateEstimatedArrival(
+  params: ArrivalCalculationParams,
+): ArrivalCalculationResult {
+  const { nowMs, durationMinutes, status, plannedDepartureTime, endedAt } = params;
+
+  if (status === "completed" && endedAt) {
+    const hasValidDuration = typeof durationMinutes === "number" && durationMinutes > 0 && !isNaN(durationMinutes);
+    return {
+      hasValidEstimate: true,
+      durationLabel: hasValidDuration ? `${Math.round(durationMinutes)} min` : "Estimated duration unavailable",
+      arrivalLabel: "Arrived at",
+      formattedArrival: formatDateTime(endedAt),
+      isScheduled: false,
+    };
+  }
+
+  if (status === "cancelled") {
+    const hasValidDuration = typeof durationMinutes === "number" && durationMinutes > 0 && !isNaN(durationMinutes);
+    return {
+      hasValidEstimate: false,
+      durationLabel: hasValidDuration ? `${Math.round(durationMinutes)} min` : "Estimated duration unavailable",
+      arrivalLabel: "Journey cancelled",
+      formattedArrival: "Unavailable",
+      isScheduled: false,
+    };
+  }
+
+  // If route duration is unavailable, do not invent an arrival time
+  if (typeof durationMinutes !== "number" || durationMinutes <= 0 || isNaN(durationMinutes)) {
+    return {
+      hasValidEstimate: false,
+      durationLabel: "Estimated duration unavailable",
+      arrivalLabel: "Est. arrival",
+      formattedArrival: "Arrival time unavailable",
+      isScheduled: false,
+    };
+  }
+
+  const durationMs = Math.round(durationMinutes * 60 * 1000);
+  const durationLabel = `${Math.round(durationMinutes)} min`;
+
+  // For a planned journey with a scheduled departure time
+  if (status === "planned" && plannedDepartureTime) {
+    const depDate = new Date(plannedDepartureTime);
+    if (!isNaN(depDate.getTime())) {
+      const depMs = depDate.getTime();
+      const arrivalMs = depMs + durationMs;
+      return {
+        hasValidEstimate: true,
+        durationLabel,
+        arrivalLabel: "Est. arrival (scheduled)",
+        formattedArrival: formatDateTime(arrivalMs),
+        formattedDeparture: formatDateTime(depMs),
+        isScheduled: true,
+      };
+    }
+  }
+
+  // Active journey or planned journey without a scheduled departure time
+  const arrivalMs = nowMs + durationMs;
+  return {
+    hasValidEstimate: true,
+    durationLabel,
+    arrivalLabel: status === "active" ? "Est. arrival" : "Est. arrival (if leaving now)",
+    formattedArrival: formatLocalTime(arrivalMs, false),
+    isScheduled: false,
+  };
+}

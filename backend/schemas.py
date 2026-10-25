@@ -216,6 +216,21 @@ class CheckInRead(BaseModel):
         return data
 
 
+class CheckInStatusRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    journey_id: int
+    journey_status: str
+    is_overdue: bool
+    checkin_required: bool
+    last_checkin_at: Optional[datetime] = None
+    next_checkin_due_at: Optional[datetime] = None
+    seconds_overdue: int = 0
+    seconds_remaining: Optional[int] = 0
+    checkin_interval_seconds: int = 90
+    status_label: str = "up_to_date"
+
+
 # ---------------------------------------------------------------------------
 # SosAlert  — SIMULATED, no real emergency services are contacted
 # ---------------------------------------------------------------------------

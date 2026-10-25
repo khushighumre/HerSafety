@@ -11,14 +11,21 @@ FastAPI router for NightWise Phase 2 Active Journeys:
 - PATCH /api/v1/journeys/{journey_id}: Update journey status or timestamps
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Journey, CheckIn
-from schemas import JourneyCreate, JourneyRead, JourneyUpdate, CheckInCreate, CheckInRead
+from schemas import (
+    JourneyCreate,
+    JourneyRead,
+    JourneyUpdate,
+    CheckInCreate,
+    CheckInRead,
+    CheckInStatusRead,
+)
 
 router = APIRouter(prefix="/journeys", tags=["Journeys"])
 
@@ -284,4 +291,97 @@ def list_check_ins(journey_id: int, db: Session = Depends(get_db)):
         .filter(CheckIn.journey_id == journey_id)
         .order_by(CheckIn.id.desc())
         .all()
+    )
+
+
+CHECKIN_INTERVAL_SECONDS = 90
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Ensure datetime is offset-aware in UTC. Converts naive timestamps safely."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+@router.get("/{journey_id}/check-in-status", response_model=CheckInStatusRead)
+@router.get("/{journey_id}/check-in-status/", response_model=CheckInStatusRead, include_in_schema=False)
+def get_check_in_status(journey_id: int, db: Session = Depends(get_db)):
+    """
+    Retrieve the current safety check-in and overdue status for a journey.
+    - Returns HTTP 404 for an unknown journey.
+    - For non-active journeys (planned, completed, cancelled), returns is_overdue=False,
+      checkin_required=False, and seconds_overdue=0.
+    - For active journeys, computes overdue state from the latest qualifying check-in
+      timestamp (or journey start timestamp if no check-in exists) against the 90-second interval.
+    - Computed on demand without relying on in-memory background timers.
+    """
+    journey = db.query(Journey).filter(Journey.id == journey_id).first()
+    if not journey:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Journey with ID {journey_id} was not found",
+        )
+
+    # Latest check-in record for this journey
+    latest_ci = (
+        db.query(CheckIn)
+        .filter(CheckIn.journey_id == journey.id)
+        .order_by(CheckIn.id.desc())
+        .first()
+    )
+
+    last_ci_raw = None
+    if latest_ci:
+        last_ci_raw = latest_ci.responded_at or latest_ci.created_at or latest_ci.checked_at
+    else:
+        last_ci_raw = journey.started_at or journey.created_at
+
+    last_ci_at = _ensure_utc(last_ci_raw)
+
+    if journey.status != "active":
+        return CheckInStatusRead(
+            journey_id=journey.id,
+            journey_status=journey.status,
+            is_overdue=False,
+            checkin_required=False,
+            last_checkin_at=last_ci_at,
+            next_checkin_due_at=None,
+            seconds_overdue=0,
+            seconds_remaining=0,
+            checkin_interval_seconds=CHECKIN_INTERVAL_SECONDS,
+            status_label="not_required",
+        )
+
+    now = datetime.now(timezone.utc)
+    if last_ci_at is None:
+        last_ci_at = now
+
+    elapsed = (now - last_ci_at).total_seconds()
+    # Overdue when an active journey has gone more than 90 seconds without a qualifying check-in
+    is_overdue = elapsed > CHECKIN_INTERVAL_SECONDS
+    next_due = last_ci_at + timedelta(seconds=CHECKIN_INTERVAL_SECONDS)
+
+    if is_overdue:
+        seconds_overdue = int(elapsed - CHECKIN_INTERVAL_SECONDS)
+        seconds_remaining = 0
+        status_label = "overdue"
+    else:
+        seconds_overdue = 0
+        seconds_remaining = max(0, int(CHECKIN_INTERVAL_SECONDS - elapsed))
+        status_label = "due_soon" if seconds_remaining <= 30 else "up_to_date"
+
+    return CheckInStatusRead(
+        journey_id=journey.id,
+        journey_status=journey.status,
+        is_overdue=is_overdue,
+        checkin_required=True,
+        last_checkin_at=last_ci_at,
+        next_checkin_due_at=next_due,
+        seconds_overdue=seconds_overdue,
+        seconds_remaining=seconds_remaining,
+        checkin_interval_seconds=CHECKIN_INTERVAL_SECONDS,
+        status_label=status_label,
     )

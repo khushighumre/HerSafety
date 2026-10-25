@@ -110,3 +110,20 @@ export async function createCheckIn(
 export async function fetchCheckIns(journeyId: number): Promise<CheckIn[]> {
   return apiRequest<CheckIn[]>("GET", `/api/v1/journeys/${journeyId}/check-ins`);
 }
+
+export interface CheckInStatus {
+  journey_id: number;
+  journey_status: string;
+  is_overdue: boolean;
+  checkin_required: boolean;
+  last_checkin_at?: string | null;
+  next_checkin_due_at?: string | null;
+  seconds_overdue: number;
+  seconds_remaining?: number | null;
+  checkin_interval_seconds: number;
+  status_label: "up_to_date" | "due_soon" | "overdue" | "not_required" | string;
+}
+
+export async function fetchCheckInStatus(journeyId: number): Promise<CheckInStatus> {
+  return apiRequest<CheckInStatus>("GET", `/api/v1/journeys/${journeyId}/check-in-status`);
+}
