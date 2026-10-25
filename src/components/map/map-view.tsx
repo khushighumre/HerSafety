@@ -23,8 +23,21 @@ interface MapViewProps {
 }
 
 /**
+ * Tile provider constants — swap these to change the map source without
+ * touching component logic.
+ *
+ * OSM standard tiles: free, no API key required.
+ * Attribution is required by the OSM tile usage policy.
+ * https://operations.osmfoundation.org/policies/tiles/
+ */
+const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILE_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+const TILE_MAX_ZOOM = 19;
+
+/**
  * Client-only Leaflet map. Leaflet is dynamically imported inside an effect so
- * it never runs during SSR. Tiles come from Carto (OSM-based, free for demos).
+ * it never runs during SSR. Tiles come from OpenStreetMap (free, no API key).
  */
 export function MapView({ center, zoom = 13, markers = [], polylines = [], circles = [], fitAll = true, className, dark }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,9 +50,9 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
 
     void (async () => {
       const L = await import("leaflet");
-      await import("leaflet/dist/leaflet.css" as string);
       if (cancelled || !containerRef.current) return;
 
+      if (mapRef.current) return;
       const map = L.map(containerRef.current, {
         center,
         zoom,
@@ -48,12 +61,10 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
       });
       mapRef.current = map;
 
-      L.tileLayer(
-        dark
-          ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          : "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>', maxZoom: 19 },
-      ).addTo(map);
+      L.tileLayer(TILE_URL, {
+        attribution: TILE_ATTRIBUTION,
+        maxZoom: TILE_MAX_ZOOM,
+      }).addTo(map);
 
       const bounds: [number, number][] = [];
       const layers: L.Layer[] = [];
@@ -98,7 +109,7 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
 
       if (fitAll && bounds.length > 1) {
         map.fitBounds(L.latLngBounds(bounds).pad(0.18));
-      } else if (fitAll && bounds.length === 1) {
+      } else if (fitAll && bounds.length === 1 && bounds[0]) {
         map.setView(bounds[0], zoom);
       }
 
@@ -134,7 +145,7 @@ export function MapView({ center, zoom = 13, markers = [], polylines = [], circl
       for (const c of circles) bounds.push([c.lat, c.lng]);
       for (const m of markers) bounds.push([m.lat, m.lng]);
       if (bounds.length > 1) map.fitBounds(L.latLngBounds(bounds).pad(0.18));
-      else if (bounds.length === 1) map.setView(bounds[0], zoom);
+      else if (bounds.length === 1 && bounds[0]) map.setView(bounds[0], zoom);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(polylines), JSON.stringify(markers), JSON.stringify(circles)]);

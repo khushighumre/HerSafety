@@ -21,7 +21,7 @@ import { PageHeader, SimulatedBadge, StatCard } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DEMO_USER, RECENT_ACTIVITY, SAFETY_TIPS } from "@/data/mock";
+import { DEMO_USER, PRIVACY_CHECKLIST, RECENT_ACTIVITY, SAFETY_TIPS } from "@/data/mock";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { pageMeta, brandTitle } from "@/lib/page-meta";
 import { cn } from "@/lib/utils";
@@ -56,8 +56,13 @@ function greeting() {
   return "Good evening";
 }
 
+const TOTAL_WEIGHT = PRIVACY_CHECKLIST.reduce((s, i) => s + i.weight, 0);
+
 function Dashboard() {
-  const [checkupScore] = useLocalStorage<number>("hersafety-checkup-score", 78);
+  const [done] = useLocalStorage<string[]>("hersafety-checkup-done", []);
+  const checkupScore = Math.round(
+    (PRIVACY_CHECKLIST.filter((i) => done.includes(i.id)).reduce((s, i) => s + i.weight, 0) / TOTAL_WEIGHT) * 100,
+  );
 
   return (
     <AppLayout>
